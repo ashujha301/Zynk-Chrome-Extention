@@ -7,9 +7,6 @@ from app.services.llm_service import generate_action_plan
 
 router = APIRouter()
 
-
-
-
 class ExecuteRequest(BaseModel):
     command: str
 
@@ -29,7 +26,10 @@ def execute_command(
     try:
         action_plan = generate_action_plan(command)
     except Exception as e:
-        return {"error": "LLM failed", "details": str(e)}
+        return {
+            "error": "Invalid LLM output",
+            "details": str(e)
+        }
 
     # deduct one credit and refresh
     updated_user = deduct_credits(db, clerk_id, amount=1)
