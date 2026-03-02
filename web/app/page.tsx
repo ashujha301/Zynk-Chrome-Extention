@@ -8,7 +8,7 @@ import {
   useUser,
   useAuth,
 } from "@clerk/nextjs";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export default function Home() {
   const { user } = useUser();
@@ -16,16 +16,45 @@ export default function Home() {
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // send the clerk token to the backend once to establish the httpOnly cookie
+  const syncToken = async () => {
+    try {
+      const token = await getToken();
+      await fetch("http://localhost:8000/auth/session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ token }),
+      });
+    } catch (err) {
+      console.warn("Failed to sync token", err);
+    }
+  };
+
+  // wrapper that automatically retries once after refreshing the cookie
+  const apiFetch = async (input: RequestInfo, init: RequestInit = {}) => {
+    let resp = await fetch(input, { credentials: "include", ...init });
+    if (resp.status === 401) {
+      // access token probably expired; refresh and retry once
+      await syncToken();
+      resp = await fetch(input, { credentials: "include", ...init });
+    }
+    return resp;
+  };
+
+  // periodically refresh the cookie every 4 minutes so it doesn't expire
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (user) {
+      interval = setInterval(syncToken, 4 * 60 * 1000); // 4 minutes
+    }
+    return () => clearInterval(interval);
+  }, [user]);
+
   const callBackend = async () => {
     try {
       setLoading(true);
-      const token = await getToken();
-
-      const res = await fetch("http://localhost:8000/protected", {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const res = await apiFetch("http://localhost:8000/user/me");
 
       const data = await res.json();
       setResponse(JSON.stringify(data, null, 2));
@@ -35,6 +64,39 @@ export default function Home() {
       setLoading(false);
     }
   };
+
+  // new helper for agent execute
+  const [command, setCommand] = useState("");
+  const callAgentExecute = async () => {
+    try {
+      setLoading(true);
+      const res = await apiFetch("http://localhost:8000/agent/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+      });
+
+      const data = await res.json();
+      setResponse(JSON.stringify(data, null, 2));
+    } catch (err) {
+      setResponse("Error connecting to agent execute.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // sync whenever the user becomes available
+  useEffect(() => {
+    if (user) {
+      syncToken();
+    } else {
+      // when the user signs out, clear the server cookie
+      fetch("http://localhost:8000/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    }
+  }, [user]);
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-black relative overflow-hidden">
@@ -80,6 +142,24 @@ export default function Home() {
           >
             {loading ? "Processing..." : "Run Secure Backend Check"}
           </button>
+
+          {/* agent execute area */}
+          <div className="mt-4">
+            <input
+              type="text"
+              value={command}
+              onChange={(e) => setCommand(e.target.value)}
+              placeholder="Enter command for agent"
+              className="w-full p-2 rounded mb-2 text-white"
+            />
+            <button
+              onClick={callAgentExecute}
+              disabled={loading || !command}
+              className="w-full bg-gradient-to-r from-green-600 to-yellow-500 py-2 rounded font-semibold hover:scale-105 transition transform shadow-lg shadow-green-500/30 disabled:opacity-50"
+            >
+              {loading ? "Processing..." : "Execute Agent Command"}
+            </button>
+          </div>
 
           {response && (
             <div className="mt-6 text-left">
