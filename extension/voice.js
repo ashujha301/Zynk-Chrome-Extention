@@ -1,28 +1,32 @@
-const voiceBtn = document.getElementById("voiceBtn");
+const startBtn = document.getElementById("startBtn");
 const stopBtn = document.getElementById("stopBtn");
 const statusEl = document.getElementById("status");
 
 let mediaRecorder;
 let audioChunks = [];
+let streamRef;
 
-voiceBtn.addEventListener("click", async () => {
+startBtn.addEventListener("click", async () => {
   try {
+    statusEl.textContent = "Requesting microphone...";
+
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    streamRef = stream;
 
     mediaRecorder = new MediaRecorder(stream);
     audioChunks = [];
 
-    mediaRecorder.ondataavailable = (event) => {
-      audioChunks.push(event.data);
+    mediaRecorder.ondataavailable = e => {
+      if (e.data.size > 0) audioChunks.push(e.data);
     };
 
     mediaRecorder.onstop = async () => {
-      const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+      const blob = new Blob(audioChunks, { type: "audio/webm" });
 
       statusEl.textContent = "Transcribing...";
 
       const formData = new FormData();
-      formData.append("file", audioBlob);
+      formData.append("file", blob);
 
       const response = await fetch(
         "https://localhost:8000/agent/transcribe",
@@ -40,7 +44,7 @@ voiceBtn.addEventListener("click", async () => {
 
         chrome.runtime.sendMessage(
           { type: "EXECUTE_COMMAND", command: data.text },
-          (resp) => {
+          resp => {
             if (resp?.error) {
               statusEl.textContent = "Error: " + resp.error;
             } else {
@@ -51,22 +55,31 @@ voiceBtn.addEventListener("click", async () => {
       } else {
         statusEl.textContent = "Transcription failed.";
       }
+
+      cleanup();
     };
 
     mediaRecorder.start();
-    statusEl.textContent = "Recording...";
-    voiceBtn.disabled = true;
+    startBtn.disabled = true;
     stopBtn.disabled = false;
+    statusEl.textContent = "Recording...";
 
   } catch (err) {
-    statusEl.textContent = "Mic permission denied.";
+    statusEl.textContent = "Mic error: " + err.name;
   }
 });
 
 stopBtn.addEventListener("click", () => {
   if (mediaRecorder && mediaRecorder.state === "recording") {
     mediaRecorder.stop();
-    voiceBtn.disabled = false;
+    startBtn.disabled = false;
     stopBtn.disabled = true;
   }
 });
+
+function cleanup() {
+  if (streamRef) {
+    streamRef.getTracks().forEach(track => track.stop());
+    streamRef = null;
+  }
+}

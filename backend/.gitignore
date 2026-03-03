@@ -2,6 +2,7 @@
 
 #Openssl Certificates pem files
 **/*.pem
+temp.webm
 
 # Ignore all Python cache directories everywhere
 **/__pycache__/

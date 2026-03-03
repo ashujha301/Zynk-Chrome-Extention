@@ -1,60 +1,107 @@
-// Open side panel when extension icon is clicked
-chrome.runtime.onInstalled.addListener(() => {
-  if (chrome.sidePanel) {
-    chrome.sidePanel.setPanelBehavior({
-      openPanelOnActionClick: true
-    });
-  }
+let _extensionToken = null;
+let _extensionTokenExp = null;
+
+// Open floating voice window when extension icon clicked
+chrome.action.onClicked.addListener(() => {
+  chrome.windows.create({
+    url: "voice.html",
+    type: "popup",
+    width: 420,
+    height: 650
+  });
 });
 
-let accessToken = null;
 
-// Always ask backend for a fresh short-lived token
-async function getAccessToken() {
-  const res = await fetch("https://localhost:8000/auth/ensure-extension-token", {
-    method: "GET",
-    credentials: "include"
-  });
+// --------------------------------------TOKEN MANAGEMENT-------------------------------------------------
 
-  if (res.status === 401) {
+function parseJwtExp(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp;
+  } catch {
     return null;
   }
-
-  const data = await res.json();
-  accessToken = data.access_token;
-  return accessToken;
 }
 
-async function executeCommand(command) {
-  const token = await getAccessToken();
-
-  if (!token) {
-    chrome.tabs.create({ url: "http://localhost:3000" });
-    return { error: "Please login first." };
+function getStoredToken() {
+  if (_extensionToken && _extensionTokenExp) {
+    const now = Math.floor(Date.now() / 1000);
+    if (now < _extensionTokenExp) return _extensionToken;
   }
-
-  const response = await fetch("https://localhost:8000/agent/execute", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`
-    },
-    body: JSON.stringify({ command })
-  });
-
-  if (response.status === 401) {
-    chrome.tabs.create({ url: "http://localhost:3000" });
-    return { error: "Session expired." };
-  }
-
-  return response.json();
+  return null;
 }
 
+async function fetchExtensionToken() {
+  const resp = await fetch(
+    "https://localhost:8000/auth/ensure-extension-token",
+    { credentials: "include" }
+  );
+
+  if (resp.status !== 200) return false;
+
+  const json = await resp.json();
+  if (!json.token) return false;
+
+  _extensionToken = json.token;
+  _extensionTokenExp = parseJwtExp(json.token);
+  return true;
+}
+
+//------------------------------------- MESSAGE HANDLER--------------------------------------------
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === "EXECUTE_COMMAND") {
-    executeCommand(message.command)
-      .then(data => sendResponse(data))
-      .catch(err => sendResponse({ error: err.message }));
+    (async () => {
+      let token = getStoredToken();
+
+      if (!token) {
+        const ok = await fetchExtensionToken();
+        if (!ok) {
+          sendResponse({ error: "Please login at https://localhost:3000" });
+          return;
+        }
+        token = getStoredToken();
+      }
+
+      const response = await fetch(
+        "https://localhost:8000/agent/execute",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify({ command: message.command })
+        }
+      );
+
+      const data = await response.json();
+
+      if (response.status === 401) {
+        _extensionToken = null;
+        sendResponse({ error: "Session expired. Login again." });
+        return;
+      }
+
+      sendResponse(data);
+
+      // execute steps in active tab
+      if (data.action_plan?.steps) {
+        const tabs = await chrome.tabs.query({
+          active: true,
+          currentWindow: true
+        });
+
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(
+            tabs[0].id,
+            { type: "EXECUTE_STEPS", steps: data.action_plan.steps }
+          );
+        }
+      }
+    })();
+
     return true;
   }
 });
+
+console.log("Zynk background loaded.");
