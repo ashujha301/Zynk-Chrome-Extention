@@ -3,15 +3,17 @@
 <head>
   <style>
     body { font-family: Arial; padding: 10px; }
-    input { width: 100%; padding: 6px; margin-bottom: 8px; }
-    button { width: 100%; padding: 6px; }
+    button { width: 100%; padding: 8px; margin-top: 8px; }
+    #status { margin-top: 10px; font-size: 14px; }
   </style>
 </head>
 <body>
   <h3>Zynk AI</h3>
-  <input id="command" placeholder="Enter command" />
-  <button id="run">Execute</button>
-  <div id="status"></div>
+
+  <button id="voiceBtn">Start Listening</button>
+  <button id="stopBtn" disabled>Stop</button>
+
+  <div id="status">Idle</div>
 
   <script src="sidepanel.js"></script>
 </body>

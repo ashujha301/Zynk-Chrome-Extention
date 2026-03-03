@@ -13,6 +13,9 @@
     "https://localhost:8000/*",
     "https://localhost:3000/*"
   ],
+  "optional_permissions": [
+    "microphone"
+  ],
   "background": {
     "service_worker": "background.js"
   },
