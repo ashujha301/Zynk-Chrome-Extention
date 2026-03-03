@@ -1,8 +1,7 @@
-from fastapi import Header, HTTPException, Depends, Cookie
-from app.core.security import verify_token
+from fastapi import Header, HTTPException, Cookie, Request
+from app.core.security import verify_clerk_token, verify_extension_token
 from app.db.session import SessionLocal
 from sqlalchemy.orm import Session
-
 
 def get_db():
     db = SessionLocal()
@@ -14,17 +13,18 @@ def get_db():
 
 def get_current_user(
     authorization: str = Header(None),
-    access_token: str = Cookie(None),
+    request: Request = None
 ):
-    # prefer header for manual testing, cookie for browser flow
-    token = None
+    # Extension auth
     if authorization:
         token = authorization.replace("Bearer ", "")
-    elif access_token:
-        token = access_token
+        payload = verify_extension_token(token)
+        return payload.get("sub")
 
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
+    # Web auth (Clerk cookie)
+    clerk_token = request.cookies.get("__session")
+    if clerk_token:
+        payload = verify_clerk_token(clerk_token)
+        return payload.get("sub")
 
-    payload = verify_token(token)
-    return payload.get("sub")
+    raise HTTPException(status_code=401, detail="Not authenticated")

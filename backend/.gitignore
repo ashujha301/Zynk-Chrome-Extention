@@ -1,5 +1,8 @@
 .env
 
+#Openssl Certificates pem files
+**/*.pem
+
 # Ignore all Python cache directories everywhere
 **/__pycache__/
 **/*.py[cod]

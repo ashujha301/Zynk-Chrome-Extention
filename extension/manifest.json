@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Zynk AI",
+  "version": "1.0",
+  "description": "Voice and gesture controlled AI Chrome extension",
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://localhost:8000/*",
+    "https://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
+}
