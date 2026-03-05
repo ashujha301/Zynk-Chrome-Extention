@@ -256,3 +256,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 console.log("Zynk background loaded.");
+
+
+// ── Gesture Message Handler ────────────────────────────────────────────────────
+// All gesture messages from voice.js (popup) come through here.
+// GESTURE_TO_TAB: forward any payload directly to content.js in the real tab.
+// This covers: cursor move/hide, pinch click, drag, copy, paste, scroll.
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+
+  if (message.type === 'GESTURE_TO_TAB') {
+    (async () => {
+      const tab = await getRealTab();
+      if (!tab) { sendResponse({ ok: false }); return; }
+
+      // Ensure content.js is injected on the current page
+      try {
+        await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      } catch {}
+
+      // Forward the payload to content.js
+      chrome.tabs.sendMessage(tab.id, message.payload, (resp) => {
+        sendResponse(resp || { ok: true });
+      });
+    })();
+    return true;
+  }
+
+});
+
+console.log('Zynk background loaded.');

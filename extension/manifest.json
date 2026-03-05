@@ -8,7 +8,10 @@
     "tabs",
     "scripting",
     "activeTab",
-    "cookies"
+    "cookies",
+    "clipboardRead",
+    "clipboardWrite",
+    "windows"
   ],
 
   "host_permissions": [
@@ -16,6 +19,10 @@
     "https://localhost:3000/*",
     "<all_urls>"
   ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
 
   "background": {
     "service_worker": "background.js"
@@ -28,6 +35,20 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "mediapipe/vision_bundle.mjs",
+        "mediapipe/hand_landmarker.task",
+        "mediapipe/wasm/vision_wasm_internal.js",
+        "mediapipe/wasm/vision_wasm_internal.wasm",
+        "mediapipe/wasm/vision_wasm_nosimd_internal.js",
+        "mediapipe/wasm/vision_wasm_nosimd_internal.wasm"
+      ],
+      "matches": ["<all_urls>"]
     }
   ]
 }
