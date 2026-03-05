@@ -1,136 +1,290 @@
-const startBtn = document.getElementById("startBtn");
-const stopBtn = document.getElementById("stopBtn");
-const statusEl = document.getElementById("status");
+//DOM refs ---------------------------------
+const statusPill     = document.getElementById('statusPill');
+const statusDot      = document.getElementById('statusDot');
+const statusPillText = document.getElementById('statusPillText');
+const loadingCard    = document.getElementById('loadingCard');
+const userCard       = document.getElementById('userCard');
+const loginCard      = document.getElementById('loginCard');
+const userAvatar     = document.getElementById('userAvatar');
+const userNameEl     = document.getElementById('userName');
+const creditsLabel   = document.getElementById('creditsLabel');
+const voiceStatus    = document.getElementById('voiceStatus');
+const recordingRing  = document.getElementById('recordingRing');
+const loginBtn       = document.getElementById('loginBtn');
+const logoutBtn      = document.getElementById('logoutBtn');
 
+//State ---------------------------------
 let mediaRecorder;
-let audioChunks = [];
-let streamRef;
+let audioChunks           = [];
+let streamRef             = null;
+let recognition           = null;
+let isRecording           = false;
+let accumulatedTranscript = '';
 
-function parseJwtExp(token) {
+//UI helpers ---------------------------------
+function showLoading() {
+  loadingCard.style.display = 'flex';
+  userCard.style.display    = 'none';
+  loginCard.style.display   = 'none';
+}
+
+function showLoginUI() {
+  loadingCard.style.display = 'none';
+  userCard.style.display    = 'none';
+  loginCard.style.display   = 'flex';
+
+  statusPill.className       = 'status-pill inactive';
+  statusPillText.textContent = 'Offline';
+  statusDot.classList.remove('pulse');
+
+  stopListening();
+}
+
+function showUserUI(name, credits) {
+  loadingCard.style.display = 'none';
+  loginCard.style.display   = 'none';
+  userCard.style.display    = 'flex';
+
+  const initial          = (name || 'U')[0].toUpperCase();
+  userAvatar.textContent  = initial;
+  // userNameEl.textContent  = name || 'User';
+  creditsLabel.textContent = `${credits ?? '-'} credits`;
+
+  statusPill.className       = 'status-pill active';
+  statusPillText.textContent = 'Active';
+  statusDot.classList.add('pulse');
+
+  startListening();
+}
+
+//Auth helpers ------------------------------------------------------------------
+async function checkAuth() {
+  showLoading();
   try {
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.exp;
+    const resp = await fetch('https://localhost:8000/auth/ensure-extension-token', {
+      credentials: 'include'
+    });
+
+    if (resp.status !== 200) { showLoginUI(); return; }
+
+    const json = await resp.json();
+    if (!json.access_token) { showLoginUI(); return; }
+
+    // Fetch user profile
+    const userResp = await fetch('https://localhost:8000/user/me', {
+      headers: { Authorization: `Bearer ${json.access_token}` }
+    });
+
+    if (!userResp.ok) { showLoginUI(); return; }
+
+    const user        = await userResp.json();
+    const displayName = user.name || user.email || user.user_id || 'User';
+    showUserUI(displayName, user.credits);
+
+  } catch (err) {
+    console.error('Auth check failed:', err);
+    showLoginUI();
+  }
+}
+
+async function fetchExtensionToken() {
+  try {
+    const resp = await fetch('https://localhost:8000/auth/ensure-extension-token', {
+      credentials: 'include'
+    });
+    if (resp.status !== 200) return null;
+    const json = await resp.json();
+    return json.access_token || null;
   } catch {
     return null;
   }
 }
 
-async function fetchExtensionToken() {
-  const resp = await fetch(
-    "https://localhost:8000/auth/ensure-extension-token",
-    { credentials: "include" }
-  );
+//Button handlers -----------------------------------------------------------------
+loginBtn.addEventListener('click', () => {
+  chrome.tabs.create({ url: 'https://localhost:3000' });
+});
 
-  if (resp.status !== 200) return null;
-
-  const json = await resp.json();
-  return json.access_token || null;
-}
-
-startBtn.addEventListener("click", async () => {
+logoutBtn.addEventListener('click', async () => {
   try {
-    statusEl.textContent = "Requesting microphone...";
+    await fetch('https://localhost:8000/auth/logout', {
+      method: 'POST',
+      credentials: 'include'
+    });
+  } catch { /* ignore */ }
+  showLoginUI();
+});
 
+// Voice: Recognition (wake-word loop)------------------------------------------
+
+async function startListening() {
+  if (recognition) return; // already running
+
+  try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    streamRef = stream;
+    streamRef    = stream;
 
-    mediaRecorder = new MediaRecorder(stream);
-    audioChunks = [];
+    recognition                = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.continuous     = true;
+    recognition.interimResults = true;
+    recognition.lang           = 'en-US';
 
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        audioChunks.push(event.data);
+    recognition.onresult = (event) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result     = event.results[i];
+        const transcript = result[0].transcript;
+
+        if (result.isFinal) accumulatedTranscript += transcript;
+
+        const full  = (accumulatedTranscript + (result.isFinal ? '' : transcript)).toLowerCase();
+        voiceStatus.textContent = `Heard: "${transcript.trim()}"`;
+
+        if ((full.includes('hey zynk') || full.includes('hey zinc') || full.includes('hey zink') || full.includes('haising') ) && !isRecording) {
+          console.log('Wake word detected');
+          accumulatedTranscript = '';
+          startRecording();
+        }
       }
     };
 
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(audioChunks, { type: "audio/webm" });
+    recognition.onerror = (event) => {
+      // "aborted" is expected when we manually stop recognition before recording
+      if (event.error === 'aborted') return;
+      console.warn('Recognition error:', event.error);
+      voiceStatus.textContent = 'Mic error: ' + event.error;
+    };
 
-      const token = await fetchExtensionToken();
-      if (!token) {
-        statusEl.textContent = "Please login at https://localhost:3000";
-        cleanup();
+    // FIX: Only restart recognition itself, not the whole startListening()
+    recognition.onend = () => {
+      if (!isRecording && recognition) {
+        try { recognition.start(); } catch {  }
+      }
+    };
+
+    recognition.start();
+    voiceStatus.textContent = 'Listening for "Hey Zynk"...';
+    recordingRing.className = 'listening';
+
+  } catch (err) {
+    console.error('Mic error:', err);
+    voiceStatus.textContent = 'Mic error: ' + err.message;
+  }
+}
+
+function stopListening() {
+  isRecording = false;
+  if (recognition) {
+    recognition.onend = null; // prevent auto-restart
+    try { recognition.stop(); } catch { }
+    recognition = null;
+  }
+  if (streamRef) {
+    streamRef.getTracks().forEach(t => t.stop());
+    streamRef = null;
+  }
+  accumulatedTranscript = '';
+}
+
+//Voice: Recording ------------------------------------------------------
+function startRecording() {
+  if (!streamRef) return;
+
+  isRecording = true;
+  audioChunks = [];
+
+  // Pause recognition while recording so it doesn't steal the mic
+  if (recognition) {
+    recognition.onend = null; // suppress auto-restart during recording
+    try { recognition.stop(); } catch { /* ignore */ }
+  }
+
+  mediaRecorder = new MediaRecorder(streamRef);
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0) audioChunks.push(e.data);
+  };
+
+  mediaRecorder.onstop = async () => {
+    isRecording             = false;
+    recordingRing.className = 'listening';
+
+    // Re-wire recognition auto-restart and resume listening
+    if (recognition) {
+      recognition.onend = () => {
+        if (!isRecording && recognition) {
+          try { recognition.start(); } catch { /* ignore */ }
+        }
+      };
+      try { recognition.start(); } catch { /* ignore */ }
+    }
+
+    const token = await fetchExtensionToken();
+    if (!token) {
+      voiceStatus.textContent = 'Session expired - please log in again.';
+      showLoginUI();
+      return;
+    }
+
+    voiceStatus.textContent = 'Transcribing...';
+
+    const blob     = new Blob(audioChunks, { type: 'audio/webm' });
+    const formData = new FormData();
+    formData.append('file', blob);
+
+    try {
+      const resp = await fetch('https://localhost:8000/agent/transcribe', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+        credentials: 'include'
+      });
+
+      const data = await resp.json();
+
+      if (!data.text) {
+        voiceStatus.textContent = 'Could not understand. Try again...';
         return;
       }
 
-      statusEl.textContent = "Transcribing voice...";
+      const command = data.text;
+      voiceStatus.textContent = `Command: "${command}"`;
 
-      const formData = new FormData();
-      formData.append("file", blob);
-
-      try {
-
-        const response = await fetch(
-          "https://localhost:8000/agent/transcribe",
-          {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${token}`
-            },
-            body: formData,
-            credentials: "include"
+      chrome.runtime.sendMessage({ type: 'EXECUTE_COMMAND', command }, (response) => {
+        if (response?.error) {
+          voiceStatus.textContent = 'Error: ' + response.error;
+          if (response.error.toLowerCase().includes('login') || response.error.toLowerCase().includes('expired')) {
+            showLoginUI();
           }
-        );
-
-        const data = await response.json();
-
-        if (!data.text) {
-          statusEl.textContent = "Speech not recognized.";
-          cleanup();
           return;
         }
 
-        const command = data.text;
+        if (response?.credits_remaining !== undefined) {
+          creditsLabel.textContent = `${response.credits_remaining} credits`;
+        }
 
-        statusEl.textContent = "Command: " + command;
+        voiceStatus.textContent = `Done: "${command}"`;
+        setTimeout(() => {
+          voiceStatus.textContent = 'Listening for "Hey Zynk"...';
+        }, 3000);
+      });
 
-        // Send command to background
-        chrome.runtime.sendMessage(
-          {
-            type: "EXECUTE_COMMAND",
-            command: command
-          },
-          (resp) => {
+    } catch (err) {
+      console.error('Transcription failed:', err);
+      voiceStatus.textContent = 'Transcription failed.';
+    }
+  };
 
-            if (resp?.error) {
-              statusEl.textContent = "Error: " + resp.error;
-              return;
-            }
+  mediaRecorder.start();
+  recordingRing.className = 'recording';
+  voiceStatus.textContent = 'Recording... (speak your command)';
 
-            statusEl.textContent = "Executed: " + command;
-          }
-        );
-
-      } catch (err) {
-        statusEl.textContent = "Transcription failed.";
-      }
-
-      cleanup();
-    };
-
-    mediaRecorder.start();
-
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
-
-    statusEl.textContent = "Recording...";
-
-  } catch (err) {
-    statusEl.textContent = "Mic error: " + err.name;
-  }
-});
-
-stopBtn.addEventListener("click", () => {
-  if (mediaRecorder && mediaRecorder.state === "recording") {
-    mediaRecorder.stop();
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-  }
-});
-
-function cleanup() {
-  if (streamRef) {
-    streamRef.getTracks().forEach(track => track.stop());
-    streamRef = null;
-  }
+  // Auto-stop after 5s - was 2s which was too short for real commands
+  setTimeout(() => {
+    if (isRecording && mediaRecorder?.state === 'recording') {
+      mediaRecorder.stop();
+    }
+  }, 5000);
 }
+
+//Boot ---------------------------------
+window.onload = checkAuth;

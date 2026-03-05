@@ -1,19 +1,41 @@
 from pydantic import BaseModel
-from typing import List, Literal, Optional
+from typing import Optional, Literal
+from enum import Enum
 
 
-class Action(BaseModel):
-    action: Literal["navigate", "click_text", "scroll"]
+class ActionType(str, Enum):
+    navigate       = "navigate"
+    click_text     = "click_text"
+    click_selector = "click_selector"
+    type           = "type"
+    press_enter    = "press_enter"
+    scroll         = "scroll"
+    wait_for       = "wait_for"
 
-    # required for navigate
+
+class ActionStep(BaseModel):
+    action: ActionType
+
+    # navigate
     url: Optional[str] = None
 
-    # required for click_text
+    # click_text
     text: Optional[str] = None
+    contains: Optional[bool] = None
 
-    # required for scroll
+    # click_selector / type / press_enter / wait_for
+    selector: Optional[str] = None
+
+    # type
+    clear: Optional[bool] = None
+
+    # scroll
     direction: Optional[Literal["up", "down"]] = None
+    amount: Optional[int] = None
+
+    # wait_for
+    timeout_ms: Optional[int] = None
 
 
 class ActionPlan(BaseModel):
-    steps: List[Action]
+    steps: list[ActionStep]

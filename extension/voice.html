@@ -1,45 +1,403 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Zynk Voice</title>
+  <title>Zynk AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
   <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0f;
+      --surface: #13131a;
+      --border: #1e1e2e;
+      --accent: #7c6aff;
+      --accent-glow: rgba(124, 106, 255, 0.25);
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #e8e8f0;
+      --muted: #5a5a72;
+    }
+
     body {
-      font-family: Arial;
-      padding: 20px;
-      background: #111;
+      font-family: 'Syne', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      width: 380px;
+      min-height: 400px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Ambient background glow */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -80px; left: -80px;
+      width: 260px; height: 260px;
+      background: radial-gradient(circle, rgba(124,106,255,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      font-family: 'Space Mono', monospace;
+      font-weight: 700;
+      font-size: 18px;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    /* Status pill */
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-family: 'Space Mono', monospace;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 4px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      transition: all 0.3s ease;
+    }
+
+    .status-pill.active {
+      border-color: rgba(34, 197, 94, 0.4);
+      color: var(--green);
+      background: rgba(34, 197, 94, 0.08);
+    }
+
+    .status-pill.inactive {
+      border-color: rgba(239, 68, 68, 0.3);
+      color: var(--red);
+      background: rgba(239, 68, 68, 0.06);
+    }
+
+    .dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+      flex-shrink: 0;
+    }
+
+    .dot.pulse {
+      animation: dotPulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes dotPulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ── MAIN CONTENT ── */
+    .content {
+      padding: 24px 20px;
+    }
+
+    /* ── USER CARD (shown when logged in) ── */
+    #userCard {
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .user-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+    }
+
+    .avatar {
+      width: 38px; height: 38px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--accent) 0%, #a78bfa 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 15px;
       color: white;
+      flex-shrink: 0;
     }
-    h2 {
-      margin-bottom: 10px;
+
+    .user-info {
+      flex: 1;
+      min-width: 0;
     }
-    button {
+
+    .user-name {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-sub {
+      font-family: 'Space Mono', monospace;
+      font-size: 10px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    .credits-badge {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      background: rgba(124, 106, 255, 0.12);
+      border: 1px solid rgba(124, 106, 255, 0.25);
+      border-radius: 8px;
+      padding: 3px 8px;
+      white-space: nowrap;
+    }
+
+    /* Voice indicator area */
+    .voice-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      padding: 20px 0 4px;
+    }
+
+    #recordingRing {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      transition: border-color 0.3s ease;
+    }
+
+    #recordingRing.listening {
+      border-color: rgba(124, 106, 255, 0.5);
+      box-shadow: 0 0 0 0 var(--accent-glow);
+      animation: ringPulse 2s ease-in-out infinite;
+    }
+
+    #recordingRing.recording {
+      border-color: var(--red);
+      box-shadow: 0 0 0 0 rgba(239,68,68,0.3);
+      animation: ringPulseRed 1s ease-in-out infinite;
+    }
+
+    @keyframes ringPulse {
+      0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+      50% { box-shadow: 0 0 0 10px transparent; }
+    }
+
+    @keyframes ringPulseRed {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.3); }
+      50% { box-shadow: 0 0 0 12px transparent; }
+    }
+
+    .mic-icon {
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    #voiceStatus {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      letter-spacing: 0.03em;
+      min-height: 16px;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px;
+      background: var(--border);
+      margin: 8px 0;
+    }
+
+    /* Logout button */
+    .btn-logout {
       width: 100%;
-      padding: 12px;
-      margin-top: 10px;
-      border: none;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid var(--border);
       border-radius: 10px;
-      font-size: 14px;
+      color: var(--muted);
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.05em;
       cursor: pointer;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
     }
-    #startBtn { background: #4CAF50; }
-    #stopBtn { background: #F44336; }
-    #status {
-      margin-top: 20px;
+
+    .btn-logout:hover {
+      border-color: rgba(239,68,68,0.4);
+      color: var(--red);
+      background: rgba(239,68,68,0.06);
+    }
+
+    /* ── LOGIN CARD (shown when logged out) ── */
+    #loginCard {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      padding: 10px 0;
+      text-align: center;
+    }
+
+    .login-icon {
+      width: 72px; height: 72px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      margin: 8px auto 0;
+    }
+
+    .login-title {
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    .login-sub {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.6;
+      margin-top: -10px;
+    }
+
+    .btn-login {
+      width: 100%;
+      padding: 13px;
+      background: var(--accent);
+      border: none;
+      border-radius: 12px;
+      color: white;
+      font-family: 'Syne', sans-serif;
       font-size: 14px;
-      color: #ccc;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 20px rgba(124, 106, 255, 0.3);
+      margin-top: 4px;
+    }
+
+    .btn-login:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 28px rgba(124, 106, 255, 0.45);
+    }
+
+    .btn-login:active {
+      transform: translateY(0);
+    }
+
+    /* ── LOADING STATE ── */
+    #loadingCard {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 30px 0;
+    }
+
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .loading-text {
+      font-family: 'Space Mono', monospace;
+      font-size: 11px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
     }
   </style>
 </head>
 <body>
 
-  <h2>Zynk AI</h2>
+  <div class="header">
+    <div class="logo">ZY<span>NK</span></div>
+    <div class="status-pill inactive" id="statusPill">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusPillText">Offline</span>
+    </div>
+  </div>
 
-  <button id="startBtn">Start Listening</button>
-  <button id="stopBtn" disabled>Stop</button>
+  <div class="content">
 
-  <div id="status">Idle</div>
+    <!-- Loading state -->
+    <div id="loadingCard">
+      <div class="spinner"></div>
+      <div class="loading-text">Checking session...</div>
+    </div>
+
+    <!-- Logged-in state -->
+    <div id="userCard">
+      <div class="user-row">
+        <div class="avatar" id="userAvatar">?</div>
+        <div class="user-info">
+          <!-- <div class="user-name" id="userName">-</div> -->
+          <div class="user-sub">Zynk AI - Authenticated</div>
+        </div>
+        <div class="credits-badge" id="creditsLabel">- credits</div>
+      </div>
+
+      <div class="voice-area">
+        <div id="recordingRing" class="listening">
+          <span class="mic-icon"></span>
+        </div>
+        <div id="voiceStatus">Listening for "Hey Zynk" ...</div>
+      </div>
+
+      <div class="divider"></div>
+      <button class="btn-logout" id="logoutBtn">Sign out</button>
+    </div>
+
+    <!-- Logged-out state -->
+    <div id="loginCard">
+      <div class="login-title">Sign in to Zynk</div>
+      <div class="login-sub">You need to be logged in<br>to use voice commands.</div>
+      <button class="btn-login" id="loginBtn">Open Login Page</button>
+    </div>
+
+  </div>
 
   <script src="voice.js"></script>
-
 </body>
 </html>
