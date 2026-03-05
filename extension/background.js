@@ -7,7 +7,7 @@ chrome.action.onClicked.addListener(() => {
     url: "voice.html",
     type: "popup",
     width: 420,
-    height: 650
+    height: 420
   });
 });
 
@@ -40,10 +40,10 @@ async function fetchExtensionToken() {
   if (resp.status !== 200) return false;
 
   const json = await resp.json();
-  if (!json.token) return false;
+  if (!json.access_token) return false;
 
-  _extensionToken = json.token;
-  _extensionTokenExp = parseJwtExp(json.token);
+  _extensionToken = json.access_token;
+  _extensionTokenExp = parseJwtExp(json.access_token);
   return true;
 }
 

@@ -6,6 +6,27 @@ let mediaRecorder;
 let audioChunks = [];
 let streamRef;
 
+function parseJwtExp(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1]));
+    return payload.exp;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchExtensionToken() {
+  const resp = await fetch(
+    "https://localhost:8000/auth/ensure-extension-token",
+    { credentials: "include" }
+  );
+
+  if (resp.status !== 200) return null;
+
+  const json = await resp.json();
+  return json.access_token || null;
+}
+
 startBtn.addEventListener("click", async () => {
   try {
     statusEl.textContent = "Requesting microphone...";
@@ -16,43 +37,71 @@ startBtn.addEventListener("click", async () => {
     mediaRecorder = new MediaRecorder(stream);
     audioChunks = [];
 
-    mediaRecorder.ondataavailable = e => {
-      if (e.data.size > 0) audioChunks.push(e.data);
+    mediaRecorder.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
     };
 
     mediaRecorder.onstop = async () => {
       const blob = new Blob(audioChunks, { type: "audio/webm" });
 
-      statusEl.textContent = "Transcribing...";
+      const token = await fetchExtensionToken();
+      if (!token) {
+        statusEl.textContent = "Please login at https://localhost:3000";
+        cleanup();
+        return;
+      }
+
+      statusEl.textContent = "Transcribing voice...";
 
       const formData = new FormData();
       formData.append("file", blob);
 
-      const response = await fetch(
-        "https://localhost:8000/agent/transcribe",
-        {
-          method: "POST",
-          body: formData,
-          credentials: "include"
-        }
-      );
+      try {
 
-      const data = await response.json();
-
-      if (data.text) {
-        statusEl.textContent = "Heard: " + data.text;
-
-        chrome.runtime.sendMessage(
-          { type: "EXECUTE_COMMAND", command: data.text },
-          resp => {
-            if (resp?.error) {
-              statusEl.textContent = "Error: " + resp.error;
-            } else {
-              statusEl.textContent = "Command executed.";
-            }
+        const response = await fetch(
+          "https://localhost:8000/agent/transcribe",
+          {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${token}`
+            },
+            body: formData,
+            credentials: "include"
           }
         );
-      } else {
+
+        const data = await response.json();
+
+        if (!data.text) {
+          statusEl.textContent = "Speech not recognized.";
+          cleanup();
+          return;
+        }
+
+        const command = data.text;
+
+        statusEl.textContent = "Command: " + command;
+
+        // Send command to background
+        chrome.runtime.sendMessage(
+          {
+            type: "EXECUTE_COMMAND",
+            command: command
+          },
+          (resp) => {
+
+            if (resp?.error) {
+              statusEl.textContent = "Error: " + resp.error;
+              return;
+            }
+
+            statusEl.textContent = "Executed: " + command;
+          }
+        );
+
+      } catch (err) {
         statusEl.textContent = "Transcription failed.";
       }
 
@@ -60,8 +109,10 @@ startBtn.addEventListener("click", async () => {
     };
 
     mediaRecorder.start();
+
     startBtn.disabled = true;
     stopBtn.disabled = false;
+
     statusEl.textContent = "Recording...";
 
   } catch (err) {
