@@ -1,4 +1,6 @@
+// =============================================================================
 // ZYNK AI - voice.js  (Voice + Gesture Control)
+// =============================================================================
 
 // -- DOM refs ------------------------------------------------------------------
 const statusPill      = document.getElementById('statusPill');
@@ -24,9 +26,9 @@ const gesturePill      = document.getElementById('gesturePill');
 const camStartBtn      = document.getElementById('camStartBtn');
 const camStopBtn       = document.getElementById('camStopBtn');
 
-
+// =============================================================================
 // VOICE STATE
-
+// =============================================================================
 let mediaRecorder;
 let audioChunks           = [];
 let streamRef             = null;
@@ -34,36 +36,62 @@ let recognition           = null;
 let isRecording           = false;
 let accumulatedTranscript = '';
 
-
+// =============================================================================
 // GESTURE STATE
-
+// =============================================================================
 let camStream     = null;
 let handsModel    = null;
 let animFrameId   = null;
 let gestureActive = false;
 let panelOpen     = false;
 
-// Pinch tracking
+// Pinch / click - works any time thumb+index are close
 let isPinching          = false;
 let pinchStartX         = 0;
 let pinchStartY         = 0;
 let pinchDragActive     = false;
 
-// Swipe tracking (two-finger)
-let swipeHistory        = [];   // [{y, time}, ...]
-const SWIPE_HISTORY_MS  = 350;
+// Cursor smoothing (EMA) + range remapping
+// Hand typically appears in 20%-80% of camera frame.
+// We remap that range to 0-1 so small movements cover the full screen.
+let cursorSmX           = 0.5;
+let cursorSmY           = 0.5;
+const CURSOR_SMOOTH     = 0.30;  // 0=frozen 1=raw. 0.3 = responsive but not jittery
+const CURSOR_IN_MIN     = 0.18;  // camera normalised value that maps to screen edge 0
+const CURSOR_IN_MAX     = 0.82;  // camera normalised value that maps to screen edge 1
+
+// Scroll: we send START/STOP to content.js which runs the interval inside the page
+// This avoids the popup->background->content round-trip latency per tick
+let scrollDir           = 0;     // 'up', 'down', or 0
+const SCROLL_PX         = 110;   // pixels per tick (tuned in content.js)
+const SCROLL_MS         = 55;    // ms between ticks
+
+// Thumb direction for thumbs-up / thumbs-down
+// Thumbs-down: thumb tip clearly BELOW the wrist
+// Thumbs-up:   thumb tip clearly ABOVE the wrist
 
 // Gesture debounce
-let lastGesture         = null;
-let lastGestureTime     = 0;
-const GESTURE_COOLDOWN  = 900;   // ms between same gesture firing
+const GESTURE_COOLDOWN  = 900;
 
 // One-finger cursor: track if cursor is being shown
 let cursorVisible = false;
 
+// Tab switcher state machine
+//  idle      : no tab mode
+//  browsing  : open hand shown, overlay visible, waiting for fist
+//  selecting : fist held, moving left/right navigates tabs
+//  confirm   : open hand shown again -> selects highlighted tab
+let tabMode          = 'idle';  // 'idle' | 'browsing' | 'selecting'
+let tabList          = [];      // [{id, title, url, index}]
+let tabHighlight     = 0;       // index of currently highlighted tab
+let tabFistXSmooth   = 0.5;     // smoothed wrist X while fist navigating
+let tabFistXPrev     = 0.5;     // previous smoothed X to detect direction
+const TAB_SMOOTH     = 0.18;    // EMA for fist X smoothing
+const TAB_STEP_DIST  = 0.07;    // how far fist must travel to move one tab
 
-// ------------------------------------ UI HELPERS ------------------------------------------
-
+// =============================================================================
+// UI HELPERS
+// =============================================================================
 function showLoading() {
   loadingCard.style.display = 'flex';
   userCard.style.display    = 'none';
@@ -92,9 +120,9 @@ function showUserUI(name, credits) {
   startListening();
 }
 
-
-// ------------------------------------ AUTH ------------------------------------------
-
+// =============================================================================
+// AUTH
+// =============================================================================
 async function checkAuth() {
   showLoading();
   try {
@@ -125,9 +153,9 @@ logoutBtn.addEventListener('click', async () => {
   showLoginUI();
 });
 
-
-// ------------------------------------ VOICE - Wake-word recognition loop ------------------------------------
-
+// =============================================================================
+// VOICE - Wake-word recognition loop
+// =============================================================================
 async function startListening() {
   if (recognition) return;
   try {
@@ -144,7 +172,7 @@ async function startListening() {
         if (result.isFinal) accumulatedTranscript += transcript;
         const full = (accumulatedTranscript + (result.isFinal ? '' : transcript)).toLowerCase();
         voiceStatus.textContent = `Heard: "${transcript.trim()}"`;
-        if ((full.includes('hey zynk') || full.includes('hey zinc') || full.includes('haizing') || full.includes('haising') || full.includes('haazing')) && !isRecording) {
+        if ((full.includes('hey zynk') || full.includes('hey zink')) && !isRecording) {
           accumulatedTranscript = '';
           startRecording();
         }
@@ -167,9 +195,9 @@ function stopListening() {
   accumulatedTranscript = '';
 }
 
-
-// ------------------------------------ VOICE - Recording (after wake word) ------------------------------------
-
+// =============================================================================
+// VOICE - Recording (after wake word)
+// =============================================================================
 function startRecording() {
   if (!streamRef) return;
   isRecording = true;
@@ -216,9 +244,9 @@ function startRecording() {
   setTimeout(() => { if (isRecording && mediaRecorder?.state === 'recording') mediaRecorder.stop(); }, 4000);
 }
 
-
-// ------------------------------------ GESTURE PANEL - toggle ------------------------------------
-
+// =============================================================================
+// GESTURE PANEL - toggle
+// =============================================================================
 gestureToggleBtn.addEventListener('click', () => {
   panelOpen = !panelOpen;
   gesturePanel.classList.toggle('open', panelOpen);
@@ -230,9 +258,9 @@ gestureToggleBtn.addEventListener('click', () => {
 camStartBtn.addEventListener('click', startCamera);
 camStopBtn.addEventListener('click',  stopCamera);
 
-
+// =============================================================================
 // CAMERA - start / stop
-
+// =============================================================================
 async function startCamera() {
   if (gestureActive) return;
   try {
@@ -269,14 +297,14 @@ function stopCamera() {
   sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
 }
 
-
+// =============================================================================
 // MEDIAPIPE TASKS VISION - Hand Landmarker
 // This is the MODERN MediaPipe API (not the old @0.4 legacy).
 // Uses wasm-unsafe-eval (allowed in MV3 via manifest CSP).
 // Files needed in mediapipe/ folder:
 //   - vision_bundle.js          (the main library)
 //   - hand_landmarker.task      (the model ~8MB)
-
+// =============================================================================
 async function initHandLandmarker() {
   if (handsModel) return;
   gestureLabel.textContent = 'Loading hand model...';
@@ -313,9 +341,9 @@ async function initHandLandmarker() {
   }
 }
 
-
-// ------------------------------------ RENDER LOOP ------------------------------------
-
+// =============================================================================
+// RENDER LOOP
+// =============================================================================
 let lastVideoTime = -1;
 
 function renderLoop() {
@@ -334,9 +362,9 @@ function renderLoop() {
   });
 }
 
-
-// ------------------------------------ HAND CONNECTIONS - skeleton drawing ------------------------------------
-
+// =============================================================================
+// HAND CONNECTIONS - skeleton drawing
+// =============================================================================
 const CONNECTIONS = [
   [0,1],[1,2],[2,3],[3,4],
   [0,5],[5,6],[6,7],[7,8],
@@ -346,10 +374,10 @@ const CONNECTIONS = [
   [5,9],[9,13],[13,17]
 ];
 
-
+// =============================================================================
 // PROCESS RESULTS - Tasks Vision format
 // results.landmarks[0] = array of 21 {x,y,z} already normalised 0..1
-
+// =============================================================================
 function onHandResults(results) {
   camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
 
@@ -366,9 +394,9 @@ function onHandResults(results) {
   processFrame(lm);
 }
 
-
+// =============================================================================
 // DRAW SKELETON
-
+// =============================================================================
 function drawSkeleton(lm) {
   const W = camCanvas.width, H = camCanvas.height;
   camCtx.strokeStyle = 'rgba(124,106,255,0.65)';
@@ -393,53 +421,126 @@ function drawSkeleton(lm) {
   }
 }
 
-
+// =============================================================================
 // LANDMARK HELPERS
-
+// =============================================================================
+// LANDMARK HELPERS
+// =============================================================================
 function dist(a, b)     { return Math.hypot(a.x - b.x, a.y - b.y); }
-function isUp(lm, t, m) { return lm[t].y < lm[m].y - 0.03; }
+
+// finger extended: tip must be above its MCP knuckle by threshold
+// tip above knuckle = finger extended
+function isUp(lm, t, m) {
+  return lm[t].y < lm[m].y - 0.03;
+}
+
+// tip clearly below knuckle = finger curled
+function isDown(lm, t, m) {
+  return lm[t].y > lm[m].y + 0.02;
+}
+
+// tip near knuckle level = half folded
+function isHalf(lm, t, m) {
+  const dy = lm[m].y - lm[t].y;
+  return dy > -0.01 && dy < 0.05;
+}
 
 function fingerStates(lm) {
   return {
-    index:  isUp(lm, 8,  5),
-    middle: isUp(lm, 12, 9),
-    ring:   isUp(lm, 16, 13),
-    pinky:  isUp(lm, 20, 17),
-    thumb:  lm[4].y < lm[3].y && lm[4].y < lm[2].y
+    // Extended: tip well above its MCP knuckle
+    index:       isUp(lm, 8,  5),
+    middle:      isUp(lm, 12, 9),
+    ring:        isUp(lm, 16, 13),
+    pinky:       isUp(lm, 20, 17),
+    // Curled: tip below its MCP knuckle (looser check for supporting fingers)
+    indexDown:   isDown(lm, 8,  5),
+    middleDown:  isDown(lm, 12, 9),
+    ringDown:    isDown(lm, 16, 13),
+    pinkyDown:   isDown(lm, 20, 17),
+    // Half folded
+    indexHalf:   isHalf(lm, 8,  5),
+    middleHalf:  isHalf(lm, 12, 9),
+    // Thumb: compare tip Y to wrist Y
+    thumbUp:   lm[4].y < lm[0].y - 0.08,
+    thumbDown: lm[4].y > lm[0].y + 0.05
   };
 }
 
-function getPinchDist(lm)      { return dist(lm[4], lm[8]); }
-function indexTipScreenPos(lm) { return { x: 1 - lm[8].x, y: lm[8].y }; }
+// Pinch: thumb tip close to index tip - works regardless of other fingers
+function getPinchDist(lm) { return dist(lm[4], lm[8]); }
 
-
-// ------------------------------------ PER-FRAME GESTURE PIPELINE ------------------------------------
-
-function processFrame(lm) {
-  const f     = fingerStates(lm);
-  const pinch = getPinchDist(lm) < 0.07;
-  const pos   = indexTipScreenPos(lm);
-
-  const onlyIndex  = f.index && !f.middle && !f.ring && !f.pinky;
-  const twoFingers = f.index && f.middle  && !f.ring && !f.pinky;
-  const fist       = !f.index && !f.middle && !f.ring && !f.pinky && !f.thumb;
-  const thumbsUp   = f.thumb && !f.index  && !f.middle && !f.ring && !f.pinky;
-
-  // 1. ONE FINGER -> cursor
-  if (onlyIndex && !pinch) {
-    cursorVisible = true;
-    sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
-    gestureLabel.textContent = 'POINTING';
-    return;
-  } else if (cursorVisible && !onlyIndex) {
-    cursorVisible = false;
-    sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
+// Smooth + amplify: maps finger position to full screen
+function smoothCursor(rawX, rawY) {
+  // Flip X because video is mirrored
+  const fx = 1.0 - rawX;
+  // Remap from [CURSOR_IN_MIN, CURSOR_IN_MAX] -> [0, 1]
+  // This means you don't need to move your finger to the extreme camera edges
+  function remap(v) {
+    return Math.max(0, Math.min(1,
+      (v - CURSOR_IN_MIN) / (CURSOR_IN_MAX - CURSOR_IN_MIN)
+    ));
   }
+  const mx = remap(fx);
+  const my = remap(rawY);
+  // EMA smoothing - reduces jitter while keeping responsiveness
+  cursorSmX += (mx - cursorSmX) * CURSOR_SMOOTH;
+  cursorSmY += (my - cursorSmY) * CURSOR_SMOOTH;
+  return { x: cursorSmX, y: cursorSmY };
+}
 
-  // 2. PINCH -> click or drag
+// =============================================================================
+// PER-FRAME GESTURE PIPELINE
+//
+// Priority order (highest first):
+//   1. PINCH (thumb+index close) -> click or drag  [always checked first]
+//   2. ONE FINGER UP, others down -> cursor arrow
+//   3. TWO FINGERS fully up -> scroll UP continuously
+//   4. TWO FINGERS half-folded -> scroll DOWN continuously
+//   5. THUMBS UP (all fingers down, thumb clearly up) -> copy
+//   6. THUMBS DOWN (all fingers down, thumb clearly down) -> paste
+// =============================================================================
+function processFrame(lm) {
+  const f      = fingerStates(lm);
+  const pinch  = getPinchDist(lm) < 0.07;  // ~7% frame width
+
+  // Index tip position (smoothed + amplified) for cursor and click target
+  const pos    = smoothCursor(lm[8].x, lm[8].y);
+
+  // --- Gesture classification ---
+
+  // ONE FINGER pointing = index clearly up, middle not extended
+  const pointing     = f.index && !f.middle;
+
+  // TWO FINGERS fully up = index + middle up, ring+pinky down, NOT in tab mode
+  const twoFull      = f.index && f.middle && !f.ring && !f.pinky && tabMode === 'idle';
+
+  // TWO FINGERS half = index + middle both half-folded
+  const twoHalf      = f.indexHalf && f.middleHalf && !f.ring && !f.pinky;
+
+  // OPEN HAND = all four fingers extended (any thumb state)
+  const openHand     = f.index && f.middle && f.ring && f.pinky;
+
+  // INDEX + RING (skip middle) = new tab gesture
+  // Index up, middle DOWN, ring up, pinky down
+  const indexRing    = f.index && !f.middle && f.ring && !f.pinky;
+
+  // THUMBS UP = thumb tip well above wrist, all fingers curled
+  const thumbsUp     = f.thumbUp  && !f.index && !f.middle && !f.ring && !f.pinky;
+
+  // THUMBS DOWN = thumb tip well below wrist, all fingers curled
+  const thumbsDown   = f.thumbDown && !f.index && !f.middle && !f.ring && !f.pinky;
+
+  // =========================================================================
+  // 1. PINCH -> CLICK (takes priority, works alongside pointing or two-finger)
+  //    Thumb+index pinch fires a click at the current cursor position.
+  //    Works even while the user is in pointing mode.
+  // =========================================================================
   if (pinch) {
     if (!isPinching) {
-      isPinching = true; pinchStartX = pos.x; pinchStartY = pos.y; pinchDragActive = false;
+      isPinching      = true;
+      pinchStartX     = pos.x;
+      pinchStartY     = pos.y;
+      pinchDragActive = false;
     } else {
       const dx = Math.abs(pos.x - pinchStartX);
       const dy = Math.abs(pos.y - pinchStartY);
@@ -448,52 +549,199 @@ function processFrame(lm) {
         sendToTab({ type: 'GESTURE_DRAG_START', nx: pinchStartX, ny: pinchStartY });
         gestureLabel.textContent = 'DRAG SELECT';
       }
-      if (pinchDragActive) sendToTab({ type: 'GESTURE_DRAG_MOVE', nx: pos.x, ny: pos.y });
+      if (pinchDragActive) {
+        sendToTab({ type: 'GESTURE_DRAG_MOVE', nx: pos.x, ny: pos.y });
+      }
     }
+    // While pinching still show cursor at pinch point
+    sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
+    gestureLabel.textContent = pinchDragActive ? 'DRAG SELECT' : 'PINCHING...';
+    stopScroll();
     return;
   } else if (isPinching) {
     if (pinchDragActive) {
       sendToTab({ type: 'GESTURE_DRAG_END' });
       gestureLabel.textContent = 'SELECT DONE';
     } else {
+      // Simple click at cursor position
       debounce('PINCH_CLICK', () => {
         sendToTab({ type: 'GESTURE_PINCH_CLICK', nx: pos.x, ny: pos.y });
         showGestureFeedback('CLICK');
       });
     }
-    isPinching = false; pinchDragActive = false;
+    isPinching      = false;
+    pinchDragActive = false;
   }
 
-  // 3. TWO FINGERS -> swipe scroll
-  if (twoFingers) {
-    const midY = (lm[8].y + lm[12].y) / 2;
-    const now  = Date.now();
-    swipeHistory.push({ y: midY, time: now });
-    swipeHistory = swipeHistory.filter(p => now - p.time < SWIPE_HISTORY_MS);
-    if (swipeHistory.length >= 4) {
-      const delta = swipeHistory[swipeHistory.length - 1].y - swipeHistory[0].y;
-      if (delta > 0.06) {
-        debounce('SWIPE_UP', () => { sendToTab({ type: 'EXECUTE_STEP', step: { action: 'scroll', direction: 'up', amount: 350 } }); showGestureFeedback('SCROLL UP'); }, 300);
-        swipeHistory = [];
-      } else if (delta < -0.06) {
-        debounce('SWIPE_DOWN', () => { sendToTab({ type: 'EXECUTE_STEP', step: { action: 'scroll', direction: 'down', amount: 350 } }); showGestureFeedback('SCROLL DOWN'); }, 300);
-        swipeHistory = [];
-      }
-    }
-    gestureLabel.textContent = 'SWIPE TO SCROLL';
+  // =========================================================================
+  // NEW TAB: index + ring (middle curled, pinky curled)
+  // Hold index up, curl middle finger down, hold ring up, pinky down
+  // =========================================================================
+  if (indexRing && tabMode === 'idle') {
+    debounce('NEW_TAB', () => {
+      chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'new_tab' });
+      showGestureFeedback('NEW TAB');
+    });
+    gestureLabel.textContent = 'NEW TAB';
+    stopScroll();
     return;
-  } else { swipeHistory = []; }
+  }
 
-  // 4. FIST -> copy
-  if (fist) {
-    debounce('FIST', () => { sendToTab({ type: 'GESTURE_COPY' }); showGestureFeedback('COPY'); });
+  // =========================================================================
+  // TAB SWITCHER - 3-step flow:
+  //   STEP 1: Show open hand  -> enter browsing mode, overlay appears
+  //   STEP 2: Close to fist   -> move fist left/right to navigate tabs
+  //   STEP 3: Open hand again -> confirm and switch to highlighted tab
+  //           (or show index finger to cancel)
+  // =========================================================================
+
+  // Classify fist: all four fingers curled (regardless of thumb)
+  const isFist = f.indexDown && f.middleDown && f.ringDown && f.pinkyDown;
+
+  if (tabMode === 'idle') {
+    // ---- STEP 1: open hand triggers tab mode entry ----
+    if (openHand) {
+      stopScroll();
+      tabMode        = 'browsing';
+      tabFistXSmooth = 1 - lm[0].x;  // init to current wrist X
+      tabFistXPrev   = tabFistXSmooth;
+      chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'get_tabs' }, (resp) => {
+        if (resp && resp.tabs) {
+          tabList      = resp.tabs;
+          tabHighlight = resp.activeIndex || 0;
+          showTabOverlay(tabList, tabHighlight);
+        }
+      });
+      gestureLabel.textContent = 'TABS: open - close fist to browse';
+      return;
+    }
+    // Not in tab mode - fall through to normal gestures
+
+  } else if (tabMode === 'browsing') {
+    // ---- Waiting for fist or cancel ----
+    if (openHand) {
+      // Still showing open hand - just hold, waiting
+      gestureLabel.textContent = 'TABS: close fist to browse';
+      stopScroll();
+      return;
+    }
+    if (isFist) {
+      // Closed to fist - enter selecting mode
+      tabMode        = 'selecting';
+      tabFistXSmooth = 1 - lm[0].x;
+      tabFistXPrev   = tabFistXSmooth;
+      gestureLabel.textContent = 'TABS: move fist left/right';
+      stopScroll();
+      return;
+    }
+    // Any other gesture cancels
+    exitTabMode();
+
+  } else if (tabMode === 'selecting') {
+    // ---- Fist held: move left/right to navigate ----
+    if (isFist) {
+      // Smooth wrist X position (flipped because mirror)
+      const rawX = 1 - lm[0].x;
+      tabFistXSmooth += (rawX - tabFistXSmooth) * TAB_SMOOTH;
+
+      const delta = tabFistXSmooth - tabFistXPrev;
+
+      if (delta > TAB_STEP_DIST && tabHighlight < tabList.length - 1) {
+        // Moved right -> next tab
+        tabHighlight++;
+        tabFistXPrev = tabFistXSmooth;
+        updateTabOverlay(tabHighlight);
+        gestureLabel.textContent = 'TAB ' + (tabHighlight + 1) + '/' + tabList.length;
+      } else if (delta < -TAB_STEP_DIST && tabHighlight > 0) {
+        // Moved left -> previous tab
+        tabHighlight--;
+        tabFistXPrev = tabFistXSmooth;
+        updateTabOverlay(tabHighlight);
+        gestureLabel.textContent = 'TAB ' + (tabHighlight + 1) + '/' + tabList.length;
+      } else {
+        gestureLabel.textContent = 'TAB ' + (tabHighlight + 1) + '/' + tabList.length + ' - open hand to select';
+      }
+      stopScroll();
+      return;
+    }
+    if (openHand) {
+      // Opened hand again = CONFIRM selection
+      const t = tabList[tabHighlight];
+      if (t) {
+        chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'switch_tab', tabId: t.id });
+        showGestureFeedback('SWITCHED TO TAB ' + (tabHighlight + 1));
+      }
+      exitTabMode();
+      return;
+    }
+    // pointing finger = cancel
+    if (pointing) {
+      exitTabMode();
+      // Fall through to cursor handling
+    } else {
+      // Any other non-fist gesture: stay in selecting so accidental
+      // gesture doesn't bail out - only pointing/open cancels
+      gestureLabel.textContent = 'TAB ' + (tabHighlight + 1) + '/' + tabList.length;
+      stopScroll();
+      return;
+    }
+  }
+
+  // =========================================================================
+  // 2. ONE FINGER -> CURSOR ARROW
+  // =========================================================================
+  if (pointing) {
+    cursorVisible = true;
+    sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
+    gestureLabel.textContent = 'CURSOR';
+    stopScroll();
+    return;
+  } else if (cursorVisible && !pointing) {
+    cursorVisible = false;
+    sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
+  }
+
+  // =========================================================================
+  // 3. TWO FINGERS FULLY UP -> SCROLL UP (continuous)
+  // =========================================================================
+  if (twoFull) {
+    startScroll('up');
+    gestureLabel.textContent = 'SCROLL UP';
+    return;
+  }
+
+  // =========================================================================
+  // 4. TWO FINGERS HALF-FOLDED -> SCROLL DOWN (continuous)
+  // =========================================================================
+  if (twoHalf) {
+    startScroll('down');
+    gestureLabel.textContent = 'SCROLL DOWN';
+    return;
+  }
+
+  // Neither scroll pose - stop scrolling
+  stopScroll();
+
+  // =========================================================================
+  // 5. THUMBS UP -> COPY
+  // =========================================================================
+  if (thumbsUp) {
+    debounce('THUMBS_UP', () => {
+      sendToTab({ type: 'GESTURE_COPY' });
+      showGestureFeedback('COPY');
+    });
     gestureLabel.textContent = 'COPY';
     return;
   }
 
-  // 5. THUMBS UP -> paste
-  if (thumbsUp) {
-    debounce('THUMBS_UP', () => { sendToTab({ type: 'GESTURE_PASTE' }); showGestureFeedback('PASTE'); });
+  // =========================================================================
+  // 6. THUMBS DOWN -> PASTE
+  // =========================================================================
+  if (thumbsDown) {
+    debounce('THUMBS_DOWN', () => {
+      sendToTab({ type: 'GESTURE_PASTE' });
+      showGestureFeedback('PASTE');
+    });
     gestureLabel.textContent = 'PASTE';
     return;
   }
@@ -501,11 +749,32 @@ function processFrame(lm) {
   gestureLabel.textContent = 'Hand detected';
 }
 
+// =============================================================================
+// CONTINUOUS SCROLL HELPERS
+// Instead of firing a message every tick from the popup (which causes
+// popup -> background -> content round-trip latency), we send one
+// GESTURE_SCROLL_START message and let content.js run the interval
+// entirely inside the page. Much lower latency, no dropped frames.
+// =============================================================================
+function startScroll(dir) {
+  if (scrollDir === dir) return; // already scrolling this direction
+  stopScroll();
+  scrollDir = dir;
+  sendToTab({ type: 'GESTURE_SCROLL_START', dir: dir, px: SCROLL_PX, ms: SCROLL_MS });
+}
 
-// ------------------------------------ HELPERS ------------------------------------
+function stopScroll() {
+  if (!scrollDir) return;
+  scrollDir = 0;
+  sendToTab({ type: 'GESTURE_SCROLL_STOP' });
+}
 
+// =============================================================================
+// HELPERS
+// =============================================================================
 const _debounceTimes = {};
-function debounce(key, fn, cooldown = GESTURE_COOLDOWN) {
+function debounce(key, fn, cooldown) {
+  cooldown = cooldown === undefined ? GESTURE_COOLDOWN : cooldown;
   const now = Date.now();
   if (now - (_debounceTimes[key] || 0) < cooldown) return;
   _debounceTimes[key] = now;
@@ -515,12 +784,47 @@ function debounce(key, fn, cooldown = GESTURE_COOLDOWN) {
 function showGestureFeedback(label) {
   gesturePill.textContent = label;
   gesturePill.classList.add('triggered');
-  setTimeout(() => { gesturePill.classList.remove('triggered'); gesturePill.textContent = 'ACTIVE'; }, 800);
+  setTimeout(function() {
+    gesturePill.classList.remove('triggered');
+    gesturePill.textContent = 'ACTIVE';
+  }, 800);
 }
 
 function sendToTab(msg) {
   chrome.runtime.sendMessage({ type: 'GESTURE_TO_TAB', payload: msg });
 }
 
+// =============================================================================
+// TAB SWITCHER OVERLAY
+// Injected into the active Chrome tab via background -> executeScript
+// =============================================================================
+function showTabOverlay(tabs, activeIdx) {
+  chrome.runtime.sendMessage({
+    type: 'TAB_OVERLAY',
+    action: 'show',
+    tabs: tabs,
+    activeIdx: activeIdx
+  });
+}
+
+function updateTabOverlay(activeIdx) {
+  // Must send full tabList so background can rebuild pills with new highlight
+  chrome.runtime.sendMessage({
+    type: 'TAB_OVERLAY',
+    action: 'update',
+    tabs: tabList,
+    activeIdx: activeIdx
+  });
+}
+
+function exitTabMode() {
+  tabMode    = 'idle';
+  tabList    = [];
+  chrome.runtime.sendMessage({ type: 'TAB_OVERLAY', action: 'hide' });
+  gestureLabel.textContent = 'Hand detected';
+}
+
+// =============================================================================
 // BOOT
+// =============================================================================
 window.onload = checkAuth;

@@ -1,0 +1,62 @@
+{
+  "manifest_version": 3,
+  "name": "Zynk AI",
+  "version": "1.0",
+  "description": "Voice and gesture controlled AI Chrome extension",
+
+  "permissions": [
+    "tabs",
+    "scripting",
+    "activeTab",
+    "cookies",
+    "clipboardRead",
+    "clipboardWrite",
+    "windows"
+  ],
+
+  "host_permissions": [
+    "https://localhost:8000/*",
+    "https://localhost:3000/*",
+    "<all_urls>"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+  },
+
+  "background": {
+    "service_worker": "background/main.js"
+  },
+
+  "action": {},
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": [
+        "content/utils.js",
+        "content/cursor.js",
+        "content/scroll.js",
+        "content/click.js",
+        "content/clipboard.js",
+        "content/executor.js",
+        "content/main.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "mediapipe/vision_bundle.mjs",
+        "mediapipe/hand_landmarker.task",
+        "mediapipe/wasm/vision_wasm_internal.js",
+        "mediapipe/wasm/vision_wasm_internal.wasm",
+        "mediapipe/wasm/vision_wasm_nosimd_internal.js",
+        "mediapipe/wasm/vision_wasm_nosimd_internal.wasm"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
