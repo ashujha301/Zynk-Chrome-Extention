@@ -154,8 +154,19 @@ function onHandResults(results) {
 
   if (!results.landmarks || results.landmarks.length === 0) {
     gestureLabel.textContent = 'No hand detected';
-    if (cursorVisible) { cursorVisible = false; sendToTab({ type: 'GESTURE_CURSOR_HIDE' }); }
-    if (isPinching)    { isPinching = false; pinchDragActive = false; sendToTab({ type: 'GESTURE_DRAG_END' }); }
+    // Force-hide cursor and stop scroll
+    sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
+    sendToTab({ type: 'GESTURE_SCROLL_STOP' });
+    // If tab overlay was open, close it now - overlay must ONLY show while palm visible
+    if (tabMode !== 'idle') {
+      exitTabMode(); // defined in gesture-actions.js - hides overlay + resets state
+    }
+    // Reset gesture-detection.js state vars
+    cursorVisible   = false;
+    cursorFrozen    = false;
+    pinchHeld       = false;
+    pinchDragActive = false;
+    scrollActive    = false;
     return;
   }
 

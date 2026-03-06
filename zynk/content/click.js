@@ -9,23 +9,41 @@ var __zynkDragPos = null;
 
 // -- Pinch click: dispatch mouse events at the cursor position ----------------
 function handlePinchClick(nx, ny) {
-  var p  = toViewport(nx, ny);
-  var c  = getOrCreateCursor();
-  var wasVisible = c && c.style.display !== 'none';
+  var p = toViewport(nx, ny);
+  var c = document.getElementById('__zynk_cursor');
 
-  // Temporarily hide cursor so elementFromPoint ignores it
-  if (c) c.style.display = 'none';
+  // Move cursor off-screen using transform before elementFromPoint
+  // so the cursor element doesn't intercept the hit test.
+  // (cursor has pointerEvents:none so this is a safety measure)
+  var prevTransform = '';
+  if (c) {
+    prevTransform = c.style.transform;
+    c.style.transform = 'translate(-9999px,-9999px)';
+  }
+
   var el = document.elementFromPoint(p.x, p.y);
-  if (wasVisible && c) c.style.display = 'block';
+
+  // Restore cursor position only if it was visible.
+  // If it was hidden (display:none), leave it hidden - restoring the
+  // transform while display is none would cause a one-frame flash
+  // when display is set back to block by the next moveCursor call.
+  if (c && c.style.display !== 'none') c.style.transform = prevTransform;
 
   if (el) {
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: p.x, clientY: p.y }));
-    el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, clientX: p.x, clientY: p.y }));
-    el.dispatchEvent(new MouseEvent('click',     { bubbles: true, clientX: p.x, clientY: p.y }));
-    // Brief highlight flash
+    var opts = { bubbles: true, cancelable: true, clientX: p.x, clientY: p.y, view: window };
+    el.dispatchEvent(new MouseEvent('mouseover',  opts));
+    el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: false, clientX: p.x, clientY: p.y }));
+    el.dispatchEvent(new MouseEvent('mousedown',  opts));
+    el.dispatchEvent(new MouseEvent('mouseup',    opts));
+    el.dispatchEvent(new MouseEvent('click',      opts));
+    // Also try focus for inputs/buttons
+    if (typeof el.focus === 'function') {
+      try { el.focus({ preventScroll: true }); } catch(e) {}
+    }
+    // Brief highlight to confirm click
     var orig = el.style.outline;
     el.style.outline = '2px solid rgba(124,106,255,0.7)';
-    setTimeout(function() { el.style.outline = orig; }, 300);
+    setTimeout(function() { el.style.outline = orig; }, 250);
   }
 }
 
@@ -33,9 +51,10 @@ function handlePinchClick(nx, ny) {
 function handleDragStart(nx, ny) {
   var p = toViewport(nx, ny);
   var c = getOrCreateCursor();
-  if (c) c.style.display = 'none';
+  var savedT = c ? c.style.transform : '';
+  if (c) c.style.transform = 'translate(-9999px,-9999px)';
   __zynkDragEl = document.elementFromPoint(p.x, p.y);
-  if (c) c.style.display = 'block';
+  if (c) c.style.transform = savedT;
   __zynkDragPos = p;
 
   if (__zynkDragEl) {

@@ -49,6 +49,41 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // ---- Cycle to next tab in same window (yo gesture) ----------------------
+  if (message.type === 'TAB_ACTION' && message.action === 'next_tab') {
+    (async () => {
+      const tab  = await getRealTab();
+      const wid  = tab ? tab.windowId : chrome.windows.WINDOW_ID_CURRENT;
+      const tabs = await chrome.tabs.query({ windowId: wid });
+      if (!tabs || tabs.length === 0) { sendResponse({ ok: false }); return; }
+      const currentIdx = tabs.findIndex(t => t.active);
+      const nextIdx    = (currentIdx + 1) % tabs.length; // wrap around
+      await chrome.tabs.update(tabs[nextIdx].id, { active: true });
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  // ---- Browser back (like clicking the Back button) -----------------------
+  if (message.type === 'TAB_ACTION' && message.action === 'nav_back') {
+    (async () => {
+      const tab = await getRealTab();
+      if (tab) await chrome.tabs.goBack(tab.id);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  // ---- Browser forward (like clicking the Forward button) ------------------
+  if (message.type === 'TAB_ACTION' && message.action === 'nav_forward') {
+    (async () => {
+      const tab = await getRealTab();
+      if (tab) await chrome.tabs.goForward(tab.id);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
   // ---- Tab overlay: inject / update / remove pill UI ----------------------
   if (message.type === 'TAB_OVERLAY') {
     (async () => {
@@ -84,7 +119,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               letterSpacing: '0.1em', textTransform: 'uppercase',
               marginBottom: '12px', fontWeight: '700',
             });
-            hint.textContent = 'Move fist left / right  --  Open hand = select  --  Point finger = cancel';
+            hint.textContent = 'Slide palm left / right to switch  --  Close fist = open tab';
             ov.appendChild(hint);
 
             // Tab pills row (windowed: max 7 around active)

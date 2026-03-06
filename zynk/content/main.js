@@ -8,8 +8,10 @@
 //   utils.js -> cursor.js -> scroll.js -> click.js -> clipboard.js -> executor.js -> main.js
 // =============================================================================
 
-if (!window.__zynkLoaded) {
-  window.__zynkLoaded = true;
+// Use document-scoped guard (not window) so the listener re-registers
+// correctly if the content script is re-injected by executeScript.
+if (!document.__zynkLoaded) {
+  document.__zynkLoaded = true;
 
   chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
 

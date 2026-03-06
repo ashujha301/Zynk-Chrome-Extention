@@ -1,8 +1,6 @@
-// =============================================================================
 // background/window.js
 // Tracks the last focused normal window (for execution target)
 // and manages the single popup window instance.
-// =============================================================================
 
 let _popupWindowId      = null;
 let _lastNormalWindowId = null;

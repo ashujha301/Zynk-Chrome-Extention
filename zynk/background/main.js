@@ -1,8 +1,5 @@
-// =============================================================================
-// background/main.js  (service worker entry point)
 // Imports all background modules in dependency order.
 // Listed in manifest.json as: "service_worker": "background/main.js"
-// =============================================================================
 
 importScripts(
   'window.js',          // popup + normal-window tracking

@@ -19,17 +19,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tab = await getRealTab();
     if (!tab) { sendResponse({ ok: false }); return; }
 
-    // ---- CURSOR MOVE: executeScript skips message round-trip entirely ----
+    // ---- CURSOR MOVE: GPU-composited via transform (zero trace) ----
+    // Calls moveCursor() from content/cursor.js which uses transform:translate().
+    // transform is composited by the GPU - position updates atomically with no
+    // layout pass, so the cursor never renders at an old position (no trace).
     if (p.type === 'GESTURE_CURSOR_MOVE') {
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: (nx, ny) => {
-            var c = document.getElementById('__zynk_cursor');
-            if (!c) return;
-            c.style.display = 'block';
-            c.style.left    = Math.round(nx * window.innerWidth)  + 'px';
-            c.style.top     = Math.round(ny * window.innerHeight) + 'px';
+            var x = Math.round(nx * window.innerWidth);
+            var y = Math.round(ny * window.innerHeight);
+            if (typeof moveCursor === 'function') {
+              moveCursor(x, y); // content/cursor.js - uses transform
+            } else {
+              // Fallback if content script not yet loaded
+              var c = document.getElementById('__zynk_cursor');
+              if (c) {
+                c.style.display   = 'block';
+                c.style.transform = 'translate(' + x + 'px,' + y + 'px)';
+              }
+            }
           },
           args: [p.nx, p.ny]
         });
@@ -44,8 +54,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            var c = document.getElementById('__zynk_cursor');
-            if (c) c.style.display = 'none';
+            if (typeof hideCursor === 'function') {
+              hideCursor(); // content/cursor.js
+            } else {
+              var c = document.getElementById('__zynk_cursor');
+              if (c) {
+                c.style.display   = 'none';
+                c.style.transform = 'translate(-9999px,-9999px)';
+              }
+            }
             if (window.__zynkScrollTimer) {
               clearInterval(window.__zynkScrollTimer);
               window.__zynkScrollTimer = null;
@@ -96,8 +113,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     // ---- All other gestures: forward to content.js message listener ----
+    // Inject all content scripts in order (idempotent - __zynkLoaded guard inside)
     try {
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: [
+          'content/utils.js',
+          'content/cursor.js',
+          'content/scroll.js',
+          'content/click.js',
+          'content/clipboard.js',
+          'content/executor.js',
+          'content/main.js'
+        ]
+      });
     } catch {}
     chrome.tabs.sendMessage(tab.id, p, (resp) => {
       sendResponse(resp || { ok: true });

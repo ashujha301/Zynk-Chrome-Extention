@@ -1,8 +1,3 @@
-// =============================================================================
-// content/utils.js
-// Shared utilities used across content modules.
-// =============================================================================
-
 // Convert normalised (0..1) coordinates to viewport pixels
 function toViewport(nx, ny) {
   return {
