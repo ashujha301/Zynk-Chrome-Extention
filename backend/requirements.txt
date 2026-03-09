@@ -1,0 +1,11 @@
+# Zynk Backend - Python Dependencies
+
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+python-jose[cryptography]
+python-dotenv
+openai
+requests
+python-multipart
