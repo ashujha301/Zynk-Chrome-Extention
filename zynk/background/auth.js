@@ -1,36 +1,34 @@
 // =============================================================================
 // background/auth.js
-// JWT token caching and refresh for API calls from the service worker.
-// Depends on: nothing (standalone)
+// Auth helper for the service worker.
+//
+// With httpOnly cookies the background script no longer stores or reads the
+// token — the browser attaches the ext_token cookie automatically on every
+// credentialed request.  All we need to do is call ensure-extension-token so
+// the backend sets / refreshes the cookie, then use credentials:'include' on
+// every subsequent API call.
+//
+// getStoredToken() is GONE — tokens never touch JS memory.
 // =============================================================================
 
-let _extensionToken    = null;
-let _extensionTokenExp = null;
+const API_BASE = 'https://localhost:8000';
 
-function parseJwtExp(token) {
-  try {
-    return JSON.parse(atob(token.split('.')[1])).exp;
-  } catch { return null; }
-}
-
-function getStoredToken() {
-  if (_extensionToken && _extensionTokenExp) {
-    const now = Math.floor(Date.now() / 1000);
-    if (now < _extensionTokenExp) return _extensionToken;
-  }
-  return null;
-}
-
+// Called once on service-worker startup and whenever a 401 is received.
+// Asks the backend to validate the Clerk __session cookie and (re)set the
+// httpOnly ext_token cookie.  Returns true on success, false on failure.
 async function fetchExtensionToken() {
   try {
-    const resp = await fetch('https://localhost:8000/auth/ensure-extension-token', {
-      credentials: 'include'
+    const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, {
+      credentials: 'include'   // sends __session (Clerk) cookie to backend
     });
-    if (resp.status !== 200) return false;
-    const json = await resp.json();
-    if (!json.access_token) return false;
-    _extensionToken    = json.access_token;
-    _extensionTokenExp = parseJwtExp(json.access_token);
-    return true;
-  } catch { return false; }
+    return resp.ok;            // backend sets ext_token cookie in the response
+  } catch {
+    return false;
+  }
+}
+
+// Convenience wrapper: ensures a valid cookie exists before an API call.
+// Returns true if ready, false if the user needs to log in.
+async function ensureAuth() {
+  return fetchExtensionToken();
 }

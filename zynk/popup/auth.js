@@ -1,23 +1,31 @@
 // =============================================================================
 // popup/auth.js
-// Authentication: session check, token fetch, login / logout buttons.
+// Authentication for the popup UI.
+//
+// With httpOnly cookies, this file never sees or stores the token value.
+// fetchExtensionToken() just asks the backend to (re)set the cookie.
+// All API calls use credentials:'include' and the browser handles the rest.
+//
 // Depends on: ui.js (showLoading, showLoginUI, showUserUI, creditsLabel)
 // =============================================================================
 
 const API_BASE = 'https://localhost:8000';
 const APP_URL  = 'https://localhost:3000';
 
-// Check current session on popup open
+// Check session on popup open
 async function checkAuth() {
   showLoading();
   try {
-    const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, { credentials: 'include' });
-    if (resp.status !== 200) { showLoginUI(); return; }
-    const json = await resp.json();
-    if (!json.access_token) { showLoginUI(); return; }
+    // This call sends the Clerk __session cookie to the backend.
+    // If valid, backend sets the ext_token httpOnly cookie and returns {ok:true}.
+    const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, {
+      credentials: 'include'
+    });
+    if (!resp.ok) { showLoginUI(); return; }
 
+    // Fetch user info — backend reads ext_token cookie automatically
     const userResp = await fetch(`${API_BASE}/user/me`, {
-      headers: { Authorization: `Bearer ${json.access_token}` }
+      credentials: 'include'    // no Authorization header needed
     });
     if (!userResp.ok) { showLoginUI(); return; }
 
@@ -28,14 +36,16 @@ async function checkAuth() {
   }
 }
 
-// Returns a fresh token for API calls, or null if session expired
+// Refreshes the ext_token cookie. Returns true on success.
+// Called before any API operation that needs auth.
 async function fetchExtensionToken() {
   try {
-    const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, { credentials: 'include' });
-    if (resp.status !== 200) return null;
-    return (await resp.json()).access_token || null;
+    const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, {
+      credentials: 'include'
+    });
+    return resp.ok;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -47,7 +57,10 @@ loginBtn.addEventListener('click', () => {
 
 logoutBtn.addEventListener('click', async () => {
   try {
-    await fetch(`${API_BASE}/auth/logout`, { method: 'POST', credentials: 'include' });
+    await fetch(`${API_BASE}/auth/logout`, {
+      method:      'POST',
+      credentials: 'include'   // backend clears the cookie server-side
+    });
   } catch {}
   showLoginUI();
 });
