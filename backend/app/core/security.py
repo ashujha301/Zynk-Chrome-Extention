@@ -7,11 +7,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------
+
 # SECRET_KEY startup guard
-# ---------------------------
-# Crash immediately with a clear message if SECRET_KEY is missing or still
-# the default development placeholder. A weak key lets anyone forge JWTs.
 if not settings.SECRET_KEY or settings.SECRET_KEY in ("dev-secret-change", ""):
     raise RuntimeError(
         "SECRET_KEY is not set or is still the default placeholder. "
@@ -19,15 +16,8 @@ if not settings.SECRET_KEY or settings.SECRET_KEY in ("dev-secret-change", ""):
         "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 
-# ---------------------------
+
 # Clerk JWKS - lazy cache
-# ---------------------------
-# JWKS is NOT fetched at module import time. Fetching at module load causes
-# the entire server to crash if Clerk is unreachable at startup (e.g. no
-# internet, wrong URL in .env, cold start before network is ready).
-#
-# Instead we fetch lazily on the first token verification and cache the result.
-# If the fetch fails we raise a clear 503 rather than crashing the process.
 
 _jwks_cache: dict | None = None
 

@@ -1,4 +1,3 @@
-// =============================================================================
 // popup/voice.js
 // Wake-word detection ("Hey Zynk") + audio recording + transcription.
 //
@@ -11,13 +10,8 @@
 //   - Only last 4 words checked — no growing stale buffer
 //   - Buffer hard-reset every 6 seconds
 //
-// TOKEN: httpOnly cookie flow — no token ever touches JS.
-//   fetchExtensionToken() refreshes the ext_token cookie server-side.
-//   All API calls use credentials:'include', browser attaches cookie automatically.
-//
 // Depends on: ui.js (voiceStatus, recordingRing, creditsLabel, showLoginUI)
 //             auth.js (fetchExtensionToken, API_BASE)
-// =============================================================================
 
 let mediaRecorder    = null;
 let audioChunks      = [];
@@ -28,10 +22,6 @@ let wakeListening    = false;
 let transcriptBuffer = '';
 let bufferResetTimer = null;
 
-// =============================================================================
-// TUNE THIS LIST based on what you see in the debug panel.
-// Say "Hey Zynk" several times and add every variant Chrome produces here.
-// =============================================================================
 const ZYNK_VARIANTS = [
   'zynk', 'zink', 'zinc', 'zing', 'zync', 'synk', 'sync', 'sink',
   'jink', 'drink', 'think', 'link', 'wink', 'pink', 'rink',
@@ -43,9 +33,6 @@ const HEY_VARIANTS = [
   'hey', 'hay', 'he', 'hei', 'hai', 'a', 'aye', 'ae', 'eh', 'ai',
 ];
 
-// =============================================================================
-// LEVENSHTEIN — fuzzy phonetic distance
-// =============================================================================
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
   const dp = Array.from({ length: m + 1 }, (_, i) => [i]);
@@ -60,15 +47,11 @@ function levenshtein(a, b) {
   return dp[m][n];
 }
 
-// =============================================================================
-// WAKE WORD CHECK
-// =============================================================================
 function isWakeWord(transcript) {
   const cleaned = transcript.toLowerCase().replace(/[^a-z\s]/g, '').trim();
   const words   = cleaned.split(/\s+/).filter(Boolean);
   const recent  = words.slice(-4);
 
-  // Case 1: Single merged word like "heyzink" or "haasing"
   const merged = recent.join('');
   if (ZYNK_VARIANTS.some(v => levenshtein(merged, v) <= 2)) return true;
   if (recent.some(w => ZYNK_VARIANTS.some(v => levenshtein(w, v) <= 1))) {
@@ -76,16 +59,11 @@ function isWakeWord(transcript) {
     if (cleaned.startsWith('hey') || cleaned.startsWith('hai') || cleaned.startsWith('hay')) return true;
   }
 
-  // Case 2: Two separate words — one hey-like, one zynk-like
   const hasHey  = recent.some(w => HEY_VARIANTS.some(h => levenshtein(w, h) <= 1));
   const hasZynk = recent.some(w => ZYNK_VARIANTS.some(v => levenshtein(w, v) <= 1));
   return hasHey && hasZynk;
 }
 
-// =============================================================================
-// DEBUG PANEL — shows every raw alternative Chrome produces.
-// Remove once wake word is reliable.
-// =============================================================================
 function showDebug(alts) {
   let panel = document.getElementById('__zynkDebug');
   if (!panel) {
@@ -109,9 +87,6 @@ function showDebug(alts) {
   while (panel.children.length > 8) panel.removeChild(panel.lastChild);
 }
 
-// =============================================================================
-// WAKE WORD LISTENER
-// =============================================================================
 async function startListening() {
   if (wakeListening) return;
   wakeListening = true;
@@ -127,9 +102,8 @@ async function startListening() {
     recognition.continuous      = true;
     recognition.interimResults  = true;
     recognition.maxAlternatives = 5;
-    recognition.lang            = 'en-IN';  // Indian English acoustic model
+    recognition.lang            = 'en-IN';
 
-    // Bias engine toward "Hey Zynk" phonetic variants
     const SGL = window.SpeechGrammarList || window.webkitSpeechGrammarList;
     if (SGL) {
       const grammar = '#JSGF V1.0; grammar wake; public <wake> = hey zynk | hey zinc | hey zink | hey zing | hey sync;';
@@ -148,16 +122,12 @@ async function startListening() {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const alts   = Array.from({ length: result.length }, (_, a) => result[a]);
-
         // showDebug(alts);
-
         const candidates = alts.map(a => a.transcript.toLowerCase());
         voiceStatus.textContent = 'Heard: "' + result[0].transcript.trim() + '"';
-
         if (result.isFinal) {
           transcriptBuffer = (transcriptBuffer + ' ' + result[0].transcript).slice(-60);
         }
-
         const toCheck = candidates.join(' ') + ' ' + transcriptBuffer;
         if (!isRecording && isWakeWord(toCheck)) {
           transcriptBuffer = '';
@@ -169,9 +139,8 @@ async function startListening() {
     };
 
     recognition.onerror = (e) => {
-      if (e.error !== 'no-speech' && e.error !== 'aborted') {
+      if (e.error !== 'no-speech' && e.error !== 'aborted')
         voiceStatus.textContent = 'Mic error: ' + e.error;
-      }
     };
 
     recognition.onend = () => {
@@ -197,9 +166,14 @@ function stopListening() {
   if (streamRef)   { streamRef.getTracks().forEach(t => t.stop()); streamRef = null; }
 }
 
-// =============================================================================
-// RECORDING — triggered after wake word
-// =============================================================================
+// ---------------------------------------------------------------------------
+// VAD constants
+// ---------------------------------------------------------------------------
+const VAD_SILENCE_THRESHOLD = 8;    // RMS energy below this = silence (0-255 scale)
+const VAD_SILENCE_MS        = 800;  // stop after this many ms of continuous silence
+const VAD_MIN_SPEECH_MS     = 300;  // don't stop until at least this much speech heard
+const VAD_MAX_MS            = 8000; // absolute hard cap
+
 function startRecording() {
   if (!streamRef || isRecording) return;
   isRecording = true;
@@ -217,11 +191,82 @@ function startRecording() {
 
   mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
 
+  // ---- VAD: Web Audio API silence detector ----------------------------------
+  // Measures RMS energy every 50ms. Once speech has started (energy > threshold)
+  // and then silence holds for VAD_SILENCE_MS, stop the recorder immediately
+  // instead of waiting the full 6 seconds.
+  let vadContext      = null;
+  let vadAnimFrame    = null;
+  let speechStarted   = false;
+  let silenceStart    = null;
+  let recordingStart  = Date.now();
+
+  function startVAD() {
+    try {
+      vadContext         = new AudioContext();
+      const source       = vadContext.createMediaStreamSource(streamRef);
+      const analyser     = vadContext.createAnalyser();
+      analyser.fftSize   = 512;
+      source.connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+
+      function tick() {
+        if (!isRecording) { stopVAD(); return; }
+
+        analyser.getByteTimeDomainData(buf);
+
+        // RMS energy
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = (buf[i] - 128) / 128;
+          sum += v * v;
+        }
+        const rms = Math.sqrt(sum / buf.length) * 255;
+
+        const now     = Date.now();
+        const elapsed = now - recordingStart;
+
+        if (rms > VAD_SILENCE_THRESHOLD) {
+          // Sound detected
+          speechStarted = true;
+          silenceStart  = null;
+        } else if (speechStarted) {
+          // Silence after speech
+          if (!silenceStart) silenceStart = now;
+          const silentFor = now - silenceStart;
+          if (elapsed >= VAD_MIN_SPEECH_MS && silentFor >= VAD_SILENCE_MS) {
+            // Enough silence after speech — stop now
+            stopVAD();
+            if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+            return;
+          }
+        }
+
+        // Hard cap
+        if (elapsed >= VAD_MAX_MS) {
+          stopVAD();
+          if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+          return;
+        }
+
+        vadAnimFrame = requestAnimationFrame(tick);
+      }
+      vadAnimFrame = requestAnimationFrame(tick);
+    } catch (e) {
+      // VAD unavailable — fall back to fixed timeout
+      console.warn('[Zynk] VAD unavailable, using fixed timeout:', e.message);
+    }
+  }
+
+  function stopVAD() {
+    if (vadAnimFrame) { cancelAnimationFrame(vadAnimFrame); vadAnimFrame = null; }
+    if (vadContext)   { vadContext.close().catch(() => {}); vadContext = null; }
+  }
+
   mediaRecorder.onstop = async () => {
     isRecording             = false;
     recordingRing.className = 'listening';
 
-    // Resume wake-word detection
     if (recognition && wakeListening) {
       recognition.onend = () => {
         if (wakeListening && !isRecording) try { recognition.start(); } catch {}
@@ -229,11 +274,9 @@ function startRecording() {
       try { recognition.start(); } catch {}
     }
 
-    // ---- Cookie auth --------------------------------------------------------
-    // fetchExtensionToken() asks the backend to refresh the ext_token httpOnly
-    // cookie. Returns true/false — the token value never touches JS.
-    const authed = await fetchExtensionToken();
-    if (!authed) { voiceStatus.textContent = 'Session expired.'; showLoginUI(); return; }
+    // Fetch token the original way — returns the token string
+    const token = await fetchExtensionToken();
+    if (!token) { voiceStatus.textContent = 'Session expired.'; showLoginUI(); return; }
 
     voiceStatus.textContent = 'Processing...';
 
@@ -243,8 +286,9 @@ function startRecording() {
     try {
       const resp = await fetch(`${API_BASE}/agent/transcribe`, {
         method:      'POST',
-        credentials: 'include',   // ext_token httpOnly cookie sent automatically — no Authorization header
-        body:        formData
+        headers:     { Authorization: `Bearer ${token}` },
+        body:        formData,
+        credentials: 'include'
       });
 
       if (!resp.ok) {
@@ -280,11 +324,10 @@ function startRecording() {
     }
   };
 
-  mediaRecorder.start(250);
+  mediaRecorder.start(100);   // smaller chunks = lower latency on stop
   recordingRing.className = 'recording';
   voiceStatus.textContent = 'Recording... speak your command';
 
-  setTimeout(() => {
-    if (isRecording && mediaRecorder?.state === 'recording') mediaRecorder.stop();
-  }, 6000);
+  startVAD(); // VAD will stop the recorder when silence is detected
+              // Hard cap of VAD_MAX_MS is enforced inside VAD tick loop
 }

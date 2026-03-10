@@ -1,6 +1,3 @@
-// =============================================================================
-// popup/gesture-detection.js
-//
 // GESTURE MAP (priority order):
 //   1. YO (index + pinky)        -> NEXT TAB
 //   2. OPEN PALM                 -> TAB SWITCHER (slide L/R, fist = open)
@@ -10,14 +7,14 @@
 //   6. INDEX + MIDDLE + RING up  -> BROWSER FORWARD
 //   7. INDEX only (moving)       -> CURSOR MOVES
 //   8. INDEX + THUMB L-shape     -> CURSOR FROZEN
-//   9. INDEX + THUMB PINCH       -> CLICK on contact / DRAG after 2.5s
+//   9. INDEX + THUMB PINCH       -> CLICK on contact / DRAG after 1.5s
 //
 // Depends on:
 //   ui.js              (gestureLabel)
 //   gesture-actions.js (sendToTab, startScrollSlow, stopScroll,
 //                       showGestureFeedback, debounce,
 //                       handleTabSwitcher, tabMode)
-// =============================================================================
+
 
 // -- Smoothed cursor ----------------------------------------------------------
 let cursorSmX = 0.5;
@@ -37,17 +34,15 @@ let pinchHeld       = false;
 let pinchStartTime  = 0;
 let pinchClickFired = false;
 let pinchDragActive = false;
-const DRAG_HOLD_MS  = 2500;
+const DRAG_HOLD_MS  = 1500;
 
 // -- Scroll state -------------------------------------------------------------
 // Tracks which scroll gesture is active so we can stop it cleanly
 // when the user drops the gesture.
 let scrollActive = false; // true while a scroll gesture is held
 
-// =============================================================================
-// LANDMARK HELPERS
-// =============================================================================
 
+// LANDMARK HELPERS
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -93,9 +88,8 @@ function isLShape(lm) {
   return xGap > 0.08 && d > 0.09;
 }
 
-// =============================================================================
+
 // MAIN FRAME PIPELINE
-// =============================================================================
 function processFrame(lm) {
   const f   = fingerStates(lm);
   const pos = smoothCursor(lm[8].x, lm[8].y);
@@ -124,7 +118,7 @@ function processFrame(lm) {
   const twoFingersDown = f.indexDown && f.middleDown && !f.ring && !f.pinky;
 
   // BACK: middle finger only up, index + ring + pinky down
-  const backGesture = f.middle && f.index && f.ring && f.pinky;
+  const backGesture = yoGesture
 
   // FORWARD: index + middle + ring all up, pinky down
   const forwardGesture = f.index && f.middle && f.ring && f.pinkyDown && !f.pinky;
@@ -138,9 +132,8 @@ function processFrame(lm) {
   // Pinch
   const isPinching = dist(lm[4], lm[8]) < 0.07;
 
-  // =========================================================================
+
   // PRIORITY 1: YO -> NEXT TAB
-  // =========================================================================
   if (yoGesture && tabMode === 'idle') {
     debounce('NEXT_TAB', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'next_tab' });
@@ -152,11 +145,10 @@ function processFrame(lm) {
     return;
   }
 
-  // =========================================================================
+
   // PRIORITY 2: OPEN PALM -> TAB SWITCHER
   // Overlay shows ONLY while palm is active. When palm drops or hand
   // disappears the overlay is removed immediately via exitTabMode().
-  // =========================================================================
   if (openPalm || (tabMode !== 'idle' && isFist)) {
     const tabHandled = handleTabSwitcher(lm, f, openPalm, isFist);
     if (tabHandled) {
@@ -172,10 +164,10 @@ function processFrame(lm) {
   // If we were in tab mode but fell through (not palm, not fist),
   // handleTabSwitcher already called exitTabMode() - overlay is gone.
 
-  // =========================================================================
+
   // PRIORITY 3: TWO FINGERS UP -> SCROLL UP
   // Index + middle both pointing up, ring + pinky curled.
-  // =========================================================================
+
   if (twoFingersUp) {
     startScrollSlow('up');
     gestureLabel.textContent = 'SCROLL UP';
@@ -187,10 +179,10 @@ function processFrame(lm) {
     return;
   }
 
-  // =========================================================================
+
   // PRIORITY 4: TWO FINGERS DOWN -> SCROLL DOWN
   // Index + middle both pointing downward (tips below MCP).
-  // =========================================================================
+
   if (twoFingersDown) {
     startScrollSlow('down');
     gestureLabel.textContent = 'SCROLL DOWN';
@@ -208,9 +200,8 @@ function processFrame(lm) {
     stopScroll();
   }
 
-  // =========================================================================
-  // PRIORITY 5: BACK (middle finger only up)
-  // =========================================================================
+
+  // PRIORITY 5: BACK (middle + pinky finger only up)
   if (backGesture) {
     debounce('NAV_BACK', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'nav_back' });
@@ -220,9 +211,9 @@ function processFrame(lm) {
     return;
   }
 
-  // =========================================================================
+
   // PRIORITY 6: FORWARD (index + middle + ring up, pinky down)
-  // =========================================================================
+
   if (forwardGesture) {
     debounce('NAV_FORWARD', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'nav_forward' });
@@ -232,12 +223,12 @@ function processFrame(lm) {
     return;
   }
 
-  // =========================================================================
+
   // PRIORITY 7 + 8 + 9: CURSOR SYSTEM
   //   A. PINCH    -> click on contact, drag after 2.5s
   //   B. L-SHAPE  -> frozen
   //   C. INDEX    -> moving
-  // =========================================================================
+
   if (indexUp) {
     if (!cursorVisible) cursorVisible = true;
 

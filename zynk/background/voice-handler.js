@@ -20,13 +20,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
 
+    // Get current page URL for better selector accuracy in the LLM
+    let current_url = null;
+    try {
+      const tab = await getRealTab();
+      if (tab?.url && !tab.url.startsWith('chrome://')) current_url = tab.url;
+    } catch {}
+
     let response;
     try {
       response = await fetch(`${API_BASE}/agent/execute`, {
         method:      'POST',
-        credentials: 'include',                        // browser sends ext_token cookie
-        headers:     { 'Content-Type': 'application/json' },  // no Authorization header
-        body:        JSON.stringify({ command: message.command })
+        credentials: 'include',
+        headers:     { 'Content-Type': 'application/json' },
+        body:        JSON.stringify({ command: message.command, current_url })
       });
     } catch (e) {
       sendResponse({ error: 'Network error: ' + e.message });
