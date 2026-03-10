@@ -15,7 +15,6 @@ async def get_me(
     user = get_or_create_user(db, clerk_id)
 
     return {
-        "clerk_id":     user.clerk_id,
-        "display_name": user.display_name,
-        "credits":      user.credits,
+        "Name": user.display_name,
+        "Credits remaining":      user.credits,
     }

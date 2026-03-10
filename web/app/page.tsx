@@ -85,26 +85,9 @@ export default function Home() {
             {loading ? "Processing..." : "Run Secure Backend Check"}
           </button>
 
-          <div className="mt-4">
-            <input
-              type="text"
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              placeholder="Enter command for agent"
-              className="w-full p-2 rounded mb-2 text-white"
-            />
-            <button
-              onClick={callAgentExecute}
-              disabled={loading || !command}
-              className="w-full bg-gradient-to-r from-green-600 to-yellow-500 py-2 rounded font-semibold hover:scale-105 transition transform shadow-lg shadow-green-500/30 disabled:opacity-50"
-            >
-              {loading ? "Processing..." : "Execute Agent Command"}
-            </button>
-          </div>
-
           {response && (
             <div className="mt-6 text-left">
-              <p className="text-xs text-gray-400 mb-2">Response Payload:</p>
+              <p className="text-xs text-gray-400 mb-2">Response:</p>
               <pre className="bg-black/60 border border-cyan-500/30 p-3 rounded-lg text-xs overflow-x-auto text-cyan-300">
                 {response}
               </pre>

@@ -1,14 +1,3 @@
-// =============================================================================
-// popup/auth.js
-// Authentication for the popup UI.
-//
-// With httpOnly cookies, this file never sees or stores the token value.
-// fetchExtensionToken() just asks the backend to (re)set the cookie.
-// All API calls use credentials:'include' and the browser handles the rest.
-//
-// Depends on: ui.js (showLoading, showLoginUI, showUserUI, creditsLabel)
-// =============================================================================
-
 const API_BASE = 'https://localhost:8000';
 const APP_URL  = 'https://localhost:3000';
 
@@ -16,8 +5,6 @@ const APP_URL  = 'https://localhost:3000';
 async function checkAuth() {
   showLoading();
   try {
-    // This call sends the Clerk __session cookie to the backend.
-    // If valid, backend sets the ext_token httpOnly cookie and returns {ok:true}.
     const resp = await fetch(`${API_BASE}/auth/ensure-extension-token`, {
       credentials: 'include'
     });
@@ -30,7 +17,7 @@ async function checkAuth() {
     if (!userResp.ok) { showLoginUI(); return; }
 
     const user = await userResp.json();
-    showUserUI(user.name || user.email || user.user_id || 'User', user.credits);
+    showUserUI(user.display_name || user.email || user.user_id || 'User', user.credits);
   } catch (e) {
     showLoginUI();
   }
