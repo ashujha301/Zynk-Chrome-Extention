@@ -9,6 +9,7 @@
 //   2. Active tab in any normal window
 //   3. A new window (fallback)
 async function getRealTab() {
+  // 1. Try the last focused normal window first
   if (_lastNormalWindowId !== null) {
     const tabs = await new Promise(r =>
       chrome.tabs.query({ active: true, windowId: _lastNormalWindowId }, r)
@@ -16,6 +17,7 @@ async function getRealTab() {
     if (tabs?.length > 0 && isExecutableTab(tabs[0])) return tabs[0];
   }
 
+  // 2. Try any normal window with an executable active tab
   const allTabs = await new Promise(r =>
     chrome.tabs.query({ active: true, windowType: 'normal' }, r)
   );
@@ -23,10 +25,9 @@ async function getRealTab() {
     if (isExecutableTab(tab)) return tab;
   }
 
-  // Last resort: open a new window
-  const win = await chrome.windows.create({ url: 'about:blank', type: 'normal' });
-  _lastNormalWindowId = win.id;
-  return win.tabs[0];
+  // 3. No executable tab found (e.g. user is on chrome://extensions, devtools, etc.)
+  //    Return null — NEVER auto-create a window. The caller must handle this.
+  return null;
 }
 
 // Chrome blocks scripting on these URL schemes

@@ -25,6 +25,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       const tab = await getRealTab();
       if (tab?.url && !tab.url.startsWith('chrome://')) current_url = tab.url;
+      // Note: tab may be null if user is on chrome:// page — current_url stays null, that's fine
     } catch {}
 
     let response;

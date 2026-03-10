@@ -2,6 +2,7 @@
 <html>
 <head>
   <title>Zynk AI</title>
+  <meta name="viewport" content="width=400, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
   <style>
@@ -25,8 +26,11 @@
       font-family: 'Syne', sans-serif;
       background: var(--bg);
       color: var(--text);
-      width: 380px;
+      width: 400px;
+      min-width: 400px;
+      max-width: 400px;
       overflow-x: hidden;
+      overflow-y: auto;
       position: relative;
     }
 
@@ -393,16 +397,6 @@
             <div class="guide-row">
               <span class="guide-key">Index + Ring</span>
               <span class="guide-val">Open new tab to the right</span>
-            </div>
-
-            <div class="guide-section">CLIPBOARD</div>
-            <div class="guide-row">
-              <span class="guide-key">Thumb up</span>
-              <span class="guide-val">Copy selection</span>
-            </div>
-            <div class="guide-row">
-              <span class="guide-key">Thumb down</span>
-              <span class="guide-val">Paste</span>
             </div>
           </div>
 
