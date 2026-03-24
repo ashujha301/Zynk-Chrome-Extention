@@ -6,16 +6,37 @@ import {
   SignInButton,
   UserButton,
   useUser,
+  useAuth
 } from "@clerk/nextjs";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 const API_BASE_URL= "https://api.zynkai.xyz"
 
 export default function Home() {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [command, setCommand] = useState("");
+
+  // ← ADD THIS: exchange Clerk JWT for our HttpOnly cookie
+  useEffect(() => {
+    const exchangeToken = async () => {
+      if (!user) return;
+      try {
+        const token = await getToken();
+        await fetch(`${API_BASE_URL}/auth/ensure-extension-token`, {
+          method: "GET",
+          credentials: "include",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        // Now every future call (including /user/me) will have the ext_token cookie
+      } catch (err) {
+        console.error("Token exchange failed", err);
+      }
+    };
+    exchangeToken();
+  }, [user]);
 
   const callBackend = async () => {
     try {

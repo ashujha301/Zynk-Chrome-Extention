@@ -21,10 +21,11 @@ async def logout(request: Request, response: Response):
 
 @router.get("/ensure-extension-token")
 async def ensure_extension_token(request: Request, response: Response):
-    # Rate limit first — prevents token farming
     await limit_ip(request, auth_ip_limiter)
 
-    clerk_token = request.cookies.get("__session")
+    # NEW: support web frontend (Clerk gives us JWT via header)
+    clerk_token = request.cookies.get("__session") or request.headers.get("Authorization", "").replace("Bearer ", "")
+
     if not clerk_token:
         raise HTTPException(status_code=401, detail="LOGIN_REQUIRED")
 
