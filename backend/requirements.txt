@@ -10,3 +10,4 @@ openai
 requests
 python-multipart
 faster-whisper
+psycopg2-binary

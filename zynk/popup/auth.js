@@ -1,5 +1,5 @@
-const API_BASE = 'https://localhost:8000';
-const APP_URL  = 'https://localhost:3000';
+const API_BASE = 'https://zynkai.duckdns.org';
+const APP_URL  = 'https://zynkai.vercel.app';
 
 // Check session on popup open
 async function checkAuth() {

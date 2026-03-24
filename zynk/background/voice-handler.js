@@ -16,7 +16,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Refresh / set the ext_token cookie before calling the API
     const authed = await fetchExtensionToken();
     if (!authed) {
-      sendResponse({ error: 'Please login at https://localhost:3000' });
+      sendResponse({ error: 'Please login at https://zynkai.vercel.app' });
       return;
     }
 

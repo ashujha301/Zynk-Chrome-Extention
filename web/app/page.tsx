@@ -9,6 +9,8 @@ import {
 } from "@clerk/nextjs";
 import { useState } from "react";
 
+const API_BASE_URL= "https://zynkai.duckdns.org"
+
 export default function Home() {
   const { user } = useUser();
   const [response, setResponse] = useState<string | null>(null);
@@ -18,7 +20,7 @@ export default function Home() {
   const callBackend = async () => {
     try {
       setLoading(true);
-      const res = await fetch("https://localhost:8000/user/me", {
+      const res = await fetch(`${API_BASE_URL}/user/me`, {
         credentials: "include",
       });
       const data = await res.json();
@@ -31,7 +33,7 @@ export default function Home() {
   const callAgentExecute = async () => {
     try {
       setLoading(true);
-      const res = await fetch("https://localhost:8000/agent/execute", {
+      const res = await fetch(`${API_BASE_URL}/agent/execute`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
