@@ -1,0 +1,70 @@
+name: Deploy Backend
+ 
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend.yml"
+ 
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+ 
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+ 
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+ 
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+ 
+      - name: Configure Docker
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+ 
+      - name: Build and Push
+        env:
+          IMAGE: us-central1-docker.pkg.dev/zynk-489815/zynk-backend/api:${{ github.sha }}
+        run: |
+          cd backend
+          docker build -t $IMAGE .
+          docker push $IMAGE
+ 
+      - name: Deploy to VM
+        uses: appleboy/ssh-action@v1
+        env:
+          IMAGE: us-central1-docker.pkg.dev/zynk-489815/zynk-backend/api:${{ github.sha }}
+        with:
+          host:     ${{ secrets.VM_HOST }}
+          username: zynk
+          key:      ${{ secrets.VM_SSH_KEY }}
+          envs:     IMAGE
+          timeout:  120s
+          script: |
+            mkdir -p /home/zynk/app
+            cat > /home/zynk/app/.env << ENVEOF
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            CLERK_JWKS_URL=${{ secrets.CLERK_JWKS_URL }}
+            CLERK_SECRET_KEY=${{ secrets.CLERK_SECRET_KEY }}
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
+            EXTENSION_ID=${{ secrets.EXTENSION_ID }}
+            WHISPER_MODEL=base
+            WHISPER_DEVICE=cpu
+            WHISPER_COMPUTE_TYPE=int8
+            ENVEOF
+            bash /home/zynk/app/deploy.sh $IMAGE
+ 
+      - name: Health Check
+        run: |
+          sleep 10
+          curl -sf http://${{ secrets.VM_HOST }}:8000/health
