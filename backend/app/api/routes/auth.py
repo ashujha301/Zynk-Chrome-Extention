@@ -37,7 +37,8 @@ async def ensure_extension_token(request: Request, response: Response):
         value=ext_token,
         httponly=True,
         secure=True,
-        samesite="none",
+        samesite="lax",
+        domain=".zynkai.xyz",
         path="/",
     )
     return {"ok": True}

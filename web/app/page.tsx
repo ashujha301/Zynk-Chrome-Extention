@@ -9,7 +9,7 @@ import {
 } from "@clerk/nextjs";
 import { useState } from "react";
 
-const API_BASE_URL= "https://zynkai.duckdns.org"
+const API_BASE_URL= "https://api.zynkai.xyz"
 
 export default function Home() {
   const { user } = useUser();

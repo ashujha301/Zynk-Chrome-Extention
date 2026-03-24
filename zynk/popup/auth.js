@@ -1,5 +1,5 @@
-const API_BASE = 'https://zynkai.duckdns.org';
-const APP_URL  = 'https://zynkai.vercel.app';
+const API_BASE = 'https://api.zynkai.xyz';
+const APP_URL  = 'https://app.zynkai.xyz';
 
 // Check session on popup open
 async function checkAuth() {

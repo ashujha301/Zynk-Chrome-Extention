@@ -23,7 +23,8 @@ _extension_origin = (
 _allowed_origins = [
     "https://localhost:3000",
     "https://localhost:8000",
-    "https://zynkai.vercel.app"
+    "https://zynkai.vercel.app",
+    "https://app.zynkai.xyz"
 ]
 if _extension_origin:
     _allowed_origins.append(_extension_origin)

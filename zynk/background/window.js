@@ -20,7 +20,7 @@ const _isMac = navigator?.platform?.toLowerCase().includes('mac') ||
                navigator?.userAgentData?.platform?.toLowerCase().includes('mac') || false;
 const _titlebarOffset      = _isMac ? 52 : 32;
 
-const POPUP_HEIGHT_CLOSED  = 260 + _titlebarOffset;
+const POPUP_HEIGHT_CLOSED  = 560 + _titlebarOffset;
 const POPUP_HEIGHT_OPEN    = 740 + _titlebarOffset;
 
 // Track last focused normal window — this is where commands execute

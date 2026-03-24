@@ -16,9 +16,10 @@
 
   "host_permissions": [
     "https://localhost:8000/*",
-    "https://zynkai.duckdns.org/*",
+    "https://api.zynkai.xyz/*",
     "https://localhost:3000/*",
     "https://zynkai.vercel.app/*",
+    "https://app.zynkai.xyz/*",
     "<all_urls>"
   ],
 

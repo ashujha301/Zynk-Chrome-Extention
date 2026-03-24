@@ -11,7 +11,7 @@
 // getStoredToken() is GONE — tokens never touch JS memory.
 // =============================================================================
 
-const API_BASE = 'https://zynkai.duckdns.org';
+const API_BASE = 'https://api.zynkai.xyz';
 
 // Called once on service-worker startup and whenever a 401 is received.
 // Asks the backend to validate the Clerk __session cookie and (re)set the
