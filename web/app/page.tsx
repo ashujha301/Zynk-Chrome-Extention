@@ -68,7 +68,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black relative overflow-hidden">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-black relative overflow-hidden">
       <div className="absolute w-[600px] h-[600px] bg-purple-600/30 blur-[150px] rounded-full top-[-200px] left-[-200px]" />
       <div className="absolute w-[500px] h-[500px] bg-cyan-500/20 blur-[150px] rounded-full bottom-[-200px] right-[-200px]" />
 
@@ -117,6 +117,19 @@ export default function Home() {
             </div>
           )}
         </SignedIn>
+      </div>
+
+      <div className="mt-6 text-xs text-gray-500 flex gap-4">
+        <a
+          href="/privacy"
+          className="hover:text-cyan-400 transition"
+        >
+          Privacy Policy
+        </a>
+
+        <span className="opacity-40">•</span>
+
+        <span className="opacity-60">© {new Date().getFullYear()} Zynk</span>
       </div>
     </div>
   );
