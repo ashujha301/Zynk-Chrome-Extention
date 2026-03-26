@@ -1,10 +1,11 @@
 // =============================================================================
 // popup/camera.js
 // Camera lifecycle, MediaPipe Tasks Vision init, render loop, skeleton draw.
-// Depends on: ui.js (camVideo, camCanvas, camCtx, gestureLabel, gesturePill,
-//                    camStartBtn, camStopBtn, gestureToggleBtn, gesturePanel)
-//             gesture-actions.js (sendToTab)
-//             gesture-detection.js (onHandResults is called from here)
+//
+// CHANGE: onHandResults now resets handFrameCount (from gesture-detection.js)
+// when the hand disappears, so the warmup guard re-arms for the next appearance.
+//
+// Depends on: ui.js, gesture-actions.js, gesture-detection.js
 // =============================================================================
 
 // -- State --------------------------------------------------------------------
@@ -34,6 +35,8 @@ gestureToggleBtn.addEventListener('click', () => {
   gestureToggleBtn.classList.toggle('active', panelOpen);
   const label = gestureToggleBtn.querySelector('.btn-label');
   if (label) label.textContent = panelOpen ? 'Disable Camera' : 'Enable Camera';
+  // Tell background to resize popup window
+  chrome.runtime.sendMessage({ type: 'RESIZE_POPUP', open: panelOpen });
 });
 
 camStartBtn.addEventListener('click', startCamera);
@@ -80,14 +83,14 @@ function stopCamera() {
   camStartBtn.disabled = false;
   camStopBtn.disabled  = true;
 
-  sendToTab({ type: 'GESTURE_CURSOR_HIDE' }); // defined in gesture-actions.js
+  // Reset warmup counter so next start is fresh
+  handFrameCount = 0;
+
+  sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
 }
 
 // =============================================================================
 // MEDIAPIPE TASKS VISION INIT
-// Requires files in extension mediapipe/ folder:
-//   vision_bundle.mjs, hand_landmarker.task, wasm/ folder
-// CSP: manifest must have "wasm-unsafe-eval" in extension_pages.
 // =============================================================================
 async function initHandLandmarker() {
   if (handsModel) return;
@@ -128,7 +131,6 @@ async function initHandLandmarker() {
 
 // =============================================================================
 // RENDER LOOP
-// Calls handsModel.detectForVideo each new frame, feeds results to pipeline.
 // =============================================================================
 function renderLoop() {
   if (!gestureActive) return;
@@ -138,7 +140,7 @@ function renderLoop() {
       if (camVideo.currentTime !== lastVideoTime) {
         lastVideoTime = camVideo.currentTime;
         const results = handsModel.detectForVideo(camVideo, nowMs);
-        onHandResults(results); // defined in gesture-detection.js
+        onHandResults(results);
       }
     }
     renderLoop();
@@ -147,20 +149,25 @@ function renderLoop() {
 
 // =============================================================================
 // HAND RESULTS DISPATCHER
-// Clears canvas, draws skeleton, calls gesture pipeline.
 // =============================================================================
 function onHandResults(results) {
   camCtx.clearRect(0, 0, camCanvas.width, camCanvas.height);
 
   if (!results.landmarks || results.landmarks.length === 0) {
     gestureLabel.textContent = 'No hand detected';
+
+    // WARMUP: reset counter so it re-arms when the hand comes back
+    handFrameCount = 0;
+
     // Force-hide cursor and stop scroll
     sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
     sendToTab({ type: 'GESTURE_SCROLL_STOP' });
-    // If tab overlay was open, close it now - overlay must ONLY show while palm visible
+
+    // Close tab overlay if open
     if (tabMode !== 'idle') {
-      exitTabMode(); // defined in gesture-actions.js - hides overlay + resets state
+      exitTabMode();
     }
+
     // Reset gesture-detection.js state vars
     cursorVisible   = false;
     cursorFrozen    = false;
@@ -170,7 +177,7 @@ function onHandResults(results) {
     return;
   }
 
-  const lm = results.landmarks[0]; // normalised {x,y,z} 0..1
+  const lm = results.landmarks[0];
   drawSkeleton(lm);
   processFrame(lm); // defined in gesture-detection.js
 }
@@ -182,7 +189,6 @@ function drawSkeleton(lm) {
   const W = camCanvas.width;
   const H = camCanvas.height;
 
-  // Bones
   camCtx.strokeStyle = 'rgba(124,106,255,0.65)';
   camCtx.lineWidth   = 2;
   for (const [a, b] of CONNECTIONS) {
@@ -191,14 +197,12 @@ function drawSkeleton(lm) {
     camCtx.lineTo(lm[b].x * W, lm[b].y * H);
     camCtx.stroke();
   }
-  // All joints
   for (const p of lm) {
     camCtx.beginPath();
     camCtx.arc(p.x * W, p.y * H, 3, 0, Math.PI * 2);
     camCtx.fillStyle = '#7c6aff';
     camCtx.fill();
   }
-  // Fingertips highlighted
   for (const i of [4, 8, 12, 16, 20]) {
     camCtx.beginPath();
     camCtx.arc(lm[i].x * W, lm[i].y * H, 5, 0, Math.PI * 2);

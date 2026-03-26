@@ -11,7 +11,7 @@
 let _popupWindowId      = null;
 let _lastNormalWindowId = null;
 
-const POPUP_WIDTH          = 400;
+const POPUP_WIDTH          = 406;
 // Heights account for OS chrome (titlebar):
 //   Windows: ~32px titlebar
 //   Mac:     ~52px titlebar (bigger traffic-light buttons)

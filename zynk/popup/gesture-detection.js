@@ -1,20 +1,44 @@
+// =============================================================================
+// gesture-detection.js
+//
 // GESTURE MAP (priority order):
 //   1. YO (index + pinky)        -> NEXT TAB
 //   2. OPEN PALM                 -> TAB SWITCHER (slide L/R, fist = open)
-//   3. INDEX + MIDDLE up         -> SCROLL UP   (both tips above MCP)
-//   4. INDEX + MIDDLE down       -> SCROLL DOWN (both tips below MCP)
-//   5. MIDDLE only up            -> BROWSER BACK
+//   3. INDEX + MIDDLE up         -> SCROLL UP
+//   4. INDEX + MIDDLE down       -> SCROLL DOWN
+//   5. YO = BACK (same gesture)  -> BROWSER BACK (reused — see note)
 //   6. INDEX + MIDDLE + RING up  -> BROWSER FORWARD
-//   7. INDEX only (moving)       -> CURSOR MOVES
+//   7. INDEX only (moving)       -> CURSOR MOVES  (+hover dispatch)
 //   8. INDEX + THUMB L-shape     -> CURSOR FROZEN
-//   9. INDEX + THUMB PINCH       -> CLICK on contact / DRAG after 1.5s
+//   9. INDEX + THUMB PINCH       -> CLICK / DRAG
+//
+// FIX 1 – ACCIDENTAL TRIGGER PREVENTION
+//   A "hand presence warmup" counter is used. When a hand first appears
+//   (or reappears after being absent) we count WARMUP_FRAMES frames before
+//   allowing any gesture to fire. During warmup, the cursor is shown but
+//   nothing is dispatched to the page. This eliminates accidental scrolls,
+//   clicks, and tab-switches that were firing the moment a hand entered frame.
+//   WARMUP_FRAMES = 20 ≈ 666ms at 30fps / 400ms at 50fps. Feels instant
+//   to the user but is long enough to cover the "just raised my hand" zone.
+//
+// FIX 2 – HOVER EVENTS WHILE MOVING
+//   dispatchHover() is called every frame when the cursor is moving so that
+//   YouTube controls, tooltips, and other :hover-triggered UI actually appear
+//   under the gesture cursor.
 //
 // Depends on:
 //   ui.js              (gestureLabel)
 //   gesture-actions.js (sendToTab, startScrollSlow, stopScroll,
 //                       showGestureFeedback, debounce,
 //                       handleTabSwitcher, tabMode)
+//   click.js           (dispatchHover)
+// =============================================================================
 
+// -- Warmup -------------------------------------------------------------------
+// Number of consecutive frames with a detected hand required before gestures
+// become active. Reset to 0 whenever the hand disappears.
+const WARMUP_FRAMES = 20;       // ~400–650ms depending on camera fps
+let   handFrameCount = 0;       // incremented each frame a hand is present
 
 // -- Smoothed cursor ----------------------------------------------------------
 let cursorSmX = 0.5;
@@ -37,12 +61,12 @@ let pinchDragActive = false;
 const DRAG_HOLD_MS  = 1500;
 
 // -- Scroll state -------------------------------------------------------------
-// Tracks which scroll gesture is active so we can stop it cleanly
-// when the user drops the gesture.
-let scrollActive = false; // true while a scroll gesture is held
+let scrollActive = false;
 
 
+// =============================================================================
 // LANDMARK HELPERS
+// =============================================================================
 function dist(a, b) {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -75,24 +99,41 @@ function smoothCursor(rawX, rawY) {
       (v - CURSOR_IN_MIN) / (CURSOR_IN_MAX - CURSOR_IN_MIN)
     ));
   }
-  cursorSmX += (remap(fx)    - cursorSmX) * CURSOR_SMOOTH;
-  cursorSmY += (remap(rawY)  - cursorSmY) * CURSOR_SMOOTH;
+  cursorSmX += (remap(fx)   - cursorSmX) * CURSOR_SMOOTH;
+  cursorSmY += (remap(rawY) - cursorSmY) * CURSOR_SMOOTH;
   return { x: cursorSmX, y: cursorSmY };
 }
 
-// L-shape: thumb extended sideways while index points up.
-// Large X-gap between thumb tip and index tip, not close together (not pinching).
+// L-shape: thumb extended sideways, index pointing up, NOT pinching.
 function isLShape(lm) {
   const xGap = Math.abs(lm[4].x - lm[8].x);
   const d    = dist(lm[4], lm[8]);
   return xGap > 0.08 && d > 0.09;
 }
 
-
+// =============================================================================
 // MAIN FRAME PIPELINE
+// Called by camera.js onHandResults for every frame that has landmarks.
+// =============================================================================
 function processFrame(lm) {
+  // -- Warmup counter ---------------------------------------------------------
+  handFrameCount++;
+  const warmedUp = handFrameCount >= WARMUP_FRAMES;
+
   const f   = fingerStates(lm);
   const pos = smoothCursor(lm[8].x, lm[8].y);
+
+  // During warmup: show the cursor moving but fire NOTHING to the page.
+  // This gives the user time to settle into their intended gesture.
+  if (!warmedUp) {
+    const pct = Math.round((handFrameCount / WARMUP_FRAMES) * 100);
+    gestureLabel.textContent = 'Ready… ' + pct + '%';
+    // Still show the cursor so the user gets position feedback
+    if (f.index && !f.middle && !f.ring) {
+      sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
+    }
+    return;
+  }
 
   // ---- Composite gesture booleans -----------------------------------------
 
@@ -106,24 +147,19 @@ function processFrame(lm) {
   const isFist = f.indexDown && f.middleDown && f.ringDown && f.pinkyDown;
 
   // TWO FINGERS UP: index + middle up, ring + pinky down -> SCROLL UP
-  // Both tips must be clearly above their MCP knuckles.
   const twoFingersUp = f.index && f.middle && !f.ring && !f.pinky
                        && f.ringDown && f.pinkyDown;
 
-  // TWO FINGERS DOWN: index + middle tips below their MCP (pointing downward)
-  // This is the hand tilted / fingers curled downward, distinct from a fist
-  // (fist has ALL fingers down; here only index+middle are pointing down while
-  // ring+pinky can be in any state, but we require ring+pinky NOT extended up
-  // to avoid conflict with other gestures).
+  // TWO FINGERS DOWN: index + middle pointing downward -> SCROLL DOWN
   const twoFingersDown = f.indexDown && f.middleDown && !f.ring && !f.pinky;
 
-  // BACK: middle finger only up, index + ring + pinky down
-  const backGesture = yoGesture
+  // BACK: yo gesture (reused — yo = index + pinky = "rock on" = go back)
+  const backGesture = yoGesture;
 
   // FORWARD: index + middle + ring all up, pinky down
   const forwardGesture = f.index && f.middle && f.ring && f.pinkyDown && !f.pinky;
 
-  // Cursor: index up, middle + ring down (pinky free, handled by yo above)
+  // Cursor: index up, middle + ring down
   const indexUp = f.index && !f.middle && !f.ring;
 
   // L-shape freeze
@@ -133,7 +169,7 @@ function processFrame(lm) {
   const isPinching = dist(lm[4], lm[8]) < 0.07;
 
 
-  // PRIORITY 1: YO -> NEXT TAB
+  // PRIORITY 1: YO -> NEXT TAB / BACK
   if (yoGesture && tabMode === 'idle') {
     debounce('NEXT_TAB', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'next_tab' });
@@ -147,8 +183,6 @@ function processFrame(lm) {
 
 
   // PRIORITY 2: OPEN PALM -> TAB SWITCHER
-  // Overlay shows ONLY while palm is active. When palm drops or hand
-  // disappears the overlay is removed immediately via exitTabMode().
   if (openPalm || (tabMode !== 'idle' && isFist)) {
     const tabHandled = handleTabSwitcher(lm, f, openPalm, isFist);
     if (tabHandled) {
@@ -161,47 +195,34 @@ function processFrame(lm) {
     }
   }
 
-  // If we were in tab mode but fell through (not palm, not fist),
-  // handleTabSwitcher already called exitTabMode() - overlay is gone.
-
 
   // PRIORITY 3: TWO FINGERS UP -> SCROLL UP
-  // Index + middle both pointing up, ring + pinky curled.
-
   if (twoFingersUp) {
     startScrollSlow('up');
     gestureLabel.textContent = 'SCROLL UP';
     scrollActive = true;
-    if (cursorVisible) {
-      cursorVisible = false;
-      sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
-    }
+    if (cursorVisible) { cursorVisible = false; sendToTab({ type: 'GESTURE_CURSOR_HIDE' }); }
     return;
   }
 
 
   // PRIORITY 4: TWO FINGERS DOWN -> SCROLL DOWN
-  // Index + middle both pointing downward (tips below MCP).
-
   if (twoFingersDown) {
     startScrollSlow('down');
     gestureLabel.textContent = 'SCROLL DOWN';
     scrollActive = true;
-    if (cursorVisible) {
-      cursorVisible = false;
-      sendToTab({ type: 'GESTURE_CURSOR_HIDE' });
-    }
+    if (cursorVisible) { cursorVisible = false; sendToTab({ type: 'GESTURE_CURSOR_HIDE' }); }
     return;
   }
 
-  // Neither scroll gesture active - stop scroll if it was running
+  // Stop scroll if neither scroll gesture is active
   if (scrollActive) {
     scrollActive = false;
     stopScroll();
   }
 
 
-  // PRIORITY 5: BACK (middle + pinky finger only up)
+  // PRIORITY 5: BACK
   if (backGesture) {
     debounce('NAV_BACK', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'nav_back' });
@@ -212,8 +233,7 @@ function processFrame(lm) {
   }
 
 
-  // PRIORITY 6: FORWARD (index + middle + ring up, pinky down)
-
+  // PRIORITY 6: FORWARD
   if (forwardGesture) {
     debounce('NAV_FORWARD', () => {
       chrome.runtime.sendMessage({ type: 'TAB_ACTION', action: 'nav_forward' });
@@ -225,14 +245,10 @@ function processFrame(lm) {
 
 
   // PRIORITY 7 + 8 + 9: CURSOR SYSTEM
-  //   A. PINCH    -> click on contact, drag after 2.5s
-  //   B. L-SHAPE  -> frozen
-  //   C. INDEX    -> moving
-
   if (indexUp) {
     if (!cursorVisible) cursorVisible = true;
 
-    // ---- A: PINCH ----
+    // ---- A: PINCH -> CLICK / DRAG ----
     if (isPinching) {
       if (!pinchHeld) {
         pinchHeld       = true;
@@ -252,8 +268,8 @@ function processFrame(lm) {
         if (pinchDragActive) {
           cursorFrozenX = pos.x;
           cursorFrozenY = pos.y;
-          sendToTab({ type: 'GESTURE_DRAG_MOVE', nx: pos.x, ny: pos.y });
-          sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
+          sendToTab({ type: 'GESTURE_DRAG_MOVE',   nx: pos.x, ny: pos.y });
+          sendToTab({ type: 'GESTURE_CURSOR_MOVE',  nx: pos.x, ny: pos.y });
           gestureLabel.textContent = 'DRAG';
         } else {
           const secsLeft = ((DRAG_HOLD_MS - heldMs) / 1000).toFixed(1);
@@ -285,6 +301,8 @@ function processFrame(lm) {
     cursorFrozenX = pos.x;
     cursorFrozenY = pos.y;
     sendToTab({ type: 'GESTURE_CURSOR_MOVE', nx: pos.x, ny: pos.y });
+    // Dispatch hover so YouTube controls / tooltips appear under the cursor
+    sendToTab({ type: 'GESTURE_HOVER', nx: pos.x, ny: pos.y });
     gestureLabel.textContent = 'CURSOR';
     return;
 
