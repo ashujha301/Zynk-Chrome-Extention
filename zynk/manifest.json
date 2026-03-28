@@ -4,6 +4,13 @@
   "version": "1.0",
   "description": "Voice and gesture controlled AI Chrome extension",
 
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
   "permissions": [
     "tabs",
     "scripting",
@@ -15,10 +22,7 @@
   ],
 
   "host_permissions": [
-    "https://localhost:8000/*",
     "https://api.zynkai.xyz/*",
-    "https://localhost:3000/*",
-    "https://zynkai.vercel.app/*",
     "https://app.zynkai.xyz/*",
     "<all_urls>"
   ],
@@ -31,7 +35,14 @@
     "service_worker": "background/main.js"
   },
 
-  "action": {},
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
 
   "content_scripts": [
     {
